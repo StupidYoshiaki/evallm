@@ -1,0 +1,25 @@
+{
+  "name": "evallm-dev",
+  "image": "evallm:latest",
+  "runArgs": ["--gpus", "all"],
+  // mount only the evallm folder into /workspaces
+  "workspaceFolder": "/workspaces",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces,type=bind,consistency=cached",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "GitHub.copilot",
+        "ms-python.python",
+        "foxundermoon.shell-format",
+        "wholroyd.jinja"
+      ]
+    }
+  },
+  "forwardPorts": [8000],
+  "postStartCommand": "pip install -r /workspaces/requirements.txt",
+  "remoteUser": "root"
+}

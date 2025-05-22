@@ -1,0 +1,2 @@
+dataset_id,splits,output_dir
+sbintuitions/JSQuAD,train,validation,data/jsquad

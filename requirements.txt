@@ -1,0 +1,13 @@
+numpy
+pandas
+transformers
+torch
+trl
+peft
+datasets
+huggingface-hub
+pydantic
+tqdm
+Jinja2
+pathlib
+python-dotenv

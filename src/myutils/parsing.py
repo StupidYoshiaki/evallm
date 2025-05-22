@@ -24,6 +24,8 @@ def render_prompt(template_name: str, **kwargs) -> str:
     except Exception as e:
         logging.error(f"テンプレート読み込み失敗 {template_name}: {e}")
         raise
+    # 値が None の場合は kwargs から削除
+    kwargs = {k: v for k, v in kwargs.items() if v is not None}
     return tmpl.render(**kwargs)
 
 def build_messages(template_name: str, **kwargs) -> List[Dict[str, str]]:

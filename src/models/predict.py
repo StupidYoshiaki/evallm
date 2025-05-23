@@ -9,13 +9,13 @@ from tqdm import tqdm
 
 from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm
 from ..myutils.parsing import build_messages, parse_json_objects
-from ..myutils.io import read_jsonl, write_jsonl
+from ..myutils.io import read_jsonl, write_jsonl, write_json
 from ..myutils.logging import setup_logging
 
 MAX_RETRIES = 10 # 最大リトライ回数
 
 def process_item(item: dict, template: str, model_label: str, max_tokens: int) -> dict:
-    messages = build_messages(template, item["context"], item["question"])
+    messages = build_messages(template, question=item["question"], context=item["context"])
     resp = generate_from_llm(
         messages=messages,
         model=model_label,
@@ -23,17 +23,17 @@ def process_item(item: dict, template: str, model_label: str, max_tokens: int) -
     )
     text = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
 
-    objs = parse_json_objects(text)
-    if not objs:
-        logging.warning(f"id={item['id']} で JSON 抜き出せず")
-        return {"id": item["id"], "context": item["context"], "qa": []}
-    
-    gen = objs[0]
+    # objs = parse_json_objects(text)
+    # if not objs:
+    #     logging.warning(f"id={item['id']} で JSON 抜き出せず")
+    #     return {"id": item["id"], "context": item["context"], "qa": []}
+    # gen = objs[0]
+
     content = {
         "id": item["id"],
         "context": item["context"],
         "question": item["question"],
-        "answer": gen,
+        "answer": text,
     }
 
     return content
@@ -50,16 +50,20 @@ def main():
     p.add_argument("--output-dir", type=Path, required=True,
                    help="出力ディレクトリ")
     p.add_argument("--max-tokens", type=int, default=200)
-    p.add_argument("--n_gpu_layers", type=int, default=None,
+    p.add_argument("--n-gpu-layers", type=int, default=None,
                    help="GPU レイヤ数")
 
     args = p.parse_args()
 
-    start_llama_server(str(args.base_model), str(args.lora_model) if args.lora_model else None, args.n_gpu_layers)
+    # import sys
+    # print(type(str(args.n_gpu_layers)))
+    # sys.exit()
+
+    start_llama_server(str(args.base_model), n_gpu_layers=args.n_gpu_layers)
     model_label = args.base_model.parts[2]
     
     dataset = read_jsonl(args.input)
-    # dataset = dataset[:3]  # デバッグ用に最初の10件だけ処理
+    dataset = dataset[:3]  # デバッグ用に最初の10件だけ処理
 
     results = []
     for item in tqdm(dataset, desc="QA 生成中"):
@@ -82,21 +86,35 @@ def main():
             logging.warning(f"id={item['id']} は最大試行回数に達したためスキップします")
 
     # 出力パスを決定
-    dname = args.base_model.parts[1]
+    dname = args.input.parts[1]
     mname = model_label
-    match args.base_model.parts[-1]:
+    match args.input.parts[-1]:
         case "baseline.jsonl":
             out_path = args.output_dir / dname / "baseline" / mname / "prediction.jsonl"
         case "generated.jsonl":
             gmname = args.input.parts[3]
-            date_str = args.input.parts[4]
+            date_str = args.input.parts[5]
             out_path = args.output_dir / dname / "generated" / gmname / date_str / mname / "prediction.jsonl"
-    
-
+        case _:
+            logging.error("不明な入力ファイル形式です")
+            return
+        
     write_jsonl(out_path, results)
 
     # サーバー停止
     stop_llama_server()
+
+    # 引数の内容を全て config.json に保存
+    config = {
+        "base_model": str(args.base_model),
+        "template": args.template,
+        "input": str(args.input),
+        "output_dir": str(args.output_dir),
+        "max_tokens": args.max_tokens,
+        "n_gpu_layers": args.n_gpu_layers,
+    }
+    config_path = out_path.parent / "config.json"
+    write_json(config_path, config)
 
 if __name__ == "__main__":
     main()

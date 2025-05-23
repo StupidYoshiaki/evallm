@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 import os
+import signal
 import subprocess
 import time
 import logging
@@ -13,39 +15,66 @@ LLM_BASE_URL = f"http://{LLM_HOST}:{LLM_PORT}/v1"
 COMPLETIONS_PATH = "/chat/completions"
 HEADERS = {"Content-Type": "application/json"}
 
-_llm_process = None
+# グローバル変数でプロセス制御
+_llm_process: subprocess.Popen = None
 
-def start_llama_server(base_model: str, lora_model: str = None, n_gpu_layers: int = None) -> None:
+def start_llama_server(
+    base_model: str,
+    lora_model: str = None,
+    n_gpu_layers: int = None
+) -> None:
     """
     BaseモデルとオプションのLoRAモデルを指定して llama-server を起動する。
-    LoRA適用時は --lora フラグで同時指定します。 :contentReference[oaicite:0]{index=0}
+    --lora, --n_gpu_layers を必要に応じて渡します。
+    プロセスは新規プロセスグループで起動し、子プロセスもまとめて管理します。
     """
     global _llm_process
-    if _llm_process:
+    if _llm_process is not None and _llm_process.poll() is None:
         logging.info(f"既に llama-server が起動中 (PID={_llm_process.pid})")
         return
 
-    cmd = [LLAMA_SERVER_CMD, "--host", LLM_HOST, "--port", str(LLM_PORT), "--model", base_model]
+    cmd = [
+        LLAMA_SERVER_CMD,
+        "--host", LLM_HOST,
+        "--port", str(LLM_PORT),
+        "--model", base_model
+    ]
     if lora_model:
-        cmd += ["--lora", lora_model]  # LoRAアダプターを同時適用 :contentReference[oaicite:1]{index=1}
+        cmd += ["--lora", lora_model]
     if n_gpu_layers:
-        cmd += ["--n_gpu_layers", str(n_gpu_layers)]
+        cmd += ["--n-gpu-layers", str(n_gpu_layers)]
 
     logging.info(f"llama-server を起動します: {' '.join(cmd)}")
-    _llm_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-    time.sleep(2)  # サーバー起動待ち
+    # preexec_fn=os.setsid でプロセスグループを分離
+    _llm_process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+        preexec_fn=os.setsid
+    )
+    time.sleep(10)  # サーバー起動待ち
     logging.info(f"llama-server 起動完了 (PID={_llm_process.pid})")
 
 def stop_llama_server() -> None:
     """
-    起動した llama-server を停止する。
+    起動された llama-server プロセスグループをまとめて停止する。
     """
     global _llm_process
-    if _llm_process:
-        logging.info("llama-server を停止します")
-        _llm_process.terminate()
+    if _llm_process is None:
+        return
+
+    pgid = os.getpgid(_llm_process.pid)
+    logging.info(f"llama-server (PGID={pgid}) を停止します")
+    # プロセスグループ全体に SIGTERM
+    os.killpg(pgid, signal.SIGTERM)
+    try:
+        _llm_process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        logging.warning("SIGTERM で終了しなかったため SIGKILL を送信します")
+        os.killpg(pgid, signal.SIGKILL)
         _llm_process.wait()
-        _llm_process = None
+    logging.info("llama-server の停止が完了しました")
+    _llm_process = None
 
 def generate_from_llm(
     messages: List[Dict[str, str]],
@@ -70,3 +99,11 @@ def generate_from_llm(
     data = resp.json()
     logging.debug(f"レスポンス: {data}")
     return data
+
+def _handle_sigint(signum, frame):
+    logging.info("CTRL-C を検知しました。llama-server を停止して終了します。")
+    stop_llama_server()
+    exit(0)
+
+# SIGINT (Ctrl-C) をキャッチして _handle_sigint を呼び出す
+signal.signal(signal.SIGINT, _handle_sigint)

@@ -1,4 +1,6 @@
 .env
 /data/
 /models/
+/output/
 __pycache__/
+core.*

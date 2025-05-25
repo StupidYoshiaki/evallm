@@ -14,14 +14,15 @@ from ..myutils.io import read_jsonl, write_jsonl, write_json
 from ..myutils.logging import setup_logging
 
 MAX_RETRIES = 10 # 最大リトライ回数
-RETRY_DELAY = 2 # 再試行までの待機時間（秒）
+RETRY_DELAY = 1 # 再試行までの待機時間（秒）
 
 async def generate_and_parse_with_retry(
     item: dict, 
     client: httpx.AsyncClient, 
     template: str, 
     model_label: str, 
-    max_tokens: int
+    max_tokens: int,
+    temperature: float = 0.7
 ) -> dict | None:
     """
     1個のアイテムに対してLLMからの生成とJSONパースを行い、失敗した場合はリトライする。
@@ -35,7 +36,8 @@ async def generate_and_parse_with_retry(
                 client=client,
                 messages=messages,
                 model=model_label,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                temperature=temperature
             )
             text = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
             return {
@@ -53,10 +55,7 @@ async def generate_and_parse_with_retry(
                 await asyncio.sleep(RETRY_DELAY) # サーバー負荷軽減のため少し待つ
             else:
                 logging.error(f"id={item['id']} は最大試行回数に達したため強制終了します。")
-                sys.stderr.write(
-                    f"エラー: {e}\n"
-                    f"トレースバック:\n{traceback.format_exc()}\n"
-                )
+                sys.exit(0)  # 強制終了
             
     return None
 
@@ -71,6 +70,7 @@ async def main():
     p.add_argument("--n-gpu-layers", type=int, default=None, help="GPU レイヤ数")
     p.add_argument("--parallel", type=int, default=8, help="並列処理数")
     p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
+    p.add_argument("--temperature", type=float, default=0.7, help="生成の温度")
 
     args = p.parse_args()
 
@@ -90,7 +90,7 @@ async def main():
             # バッチ内の各アイテムに対して、リトライ機能付きのワーカータスクを作成
             tasks = [
                 generate_and_parse_with_retry(
-                    item, client, args.template, model_label, args.max_tokens
+                    item, client, args.template, model_label, args.max_tokens, args.temperature
                 ) 
                 for item in batch
             ]

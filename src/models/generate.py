@@ -1,3 +1,4 @@
+import sys
 import json
 import random
 import argparse
@@ -16,7 +17,7 @@ from ..myutils.io import read_jsonl, write_jsonl, write_json
 from ..myutils.logging import setup_logging
 
 MAX_RETRIES = 10 # 最大リトライ回数
-RETRY_DELAY = 2 # 再試行までの待機時間（秒）
+RETRY_DELAY = 1 # 再試行までの待機時間（秒）
 
 def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
     """Few-shotのサンプルを読み込み、単一の文字列に結合する"""
@@ -43,7 +44,8 @@ async def generate_and_parse_with_retry(
     template: str,
     model_label: str,
     max_tokens: int,
-    few_shots: str | None
+    few_shots: str | None,
+    temperature: float = 0.7
 ) -> dict | None:
     """
     1個のアイテムに対してLLMからの生成とJSONパースを行い、失敗した場合はリトライする非同期ワーカー関数。
@@ -57,7 +59,7 @@ async def generate_and_parse_with_retry(
                 messages=messages,
                 model=model_label,
                 max_tokens=max_tokens,
-                temperature=0.1 # JSON生成なので低めに設定
+                temperature=temperature
             )
             text = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
@@ -77,6 +79,7 @@ async def generate_and_parse_with_retry(
                 else:
                     raise ValueError("生成されたJSONに必要な'question'または'answer'キーがありません。")
             else:
+                # logging.info(f"レスポンステキスト: {text}")
                 raise ValueError("生成されたテキストから有効なJSONを抽出できませんでした。")
 
         except Exception as e:
@@ -86,8 +89,8 @@ async def generate_and_parse_with_retry(
                 logging.info(f"{RETRY_DELAY}秒後に再試行します…")
                 await asyncio.sleep(RETRY_DELAY)
             else:
-                logging.error(f"id={item['id']} は最大試行回数に達したためスキップします。")
-                return None
+                logging.error(f"id={item['id']} は最大試行回数に達したため強制終了します。")
+                sys.exit(0)  # 強制終了
     return None
 
 
@@ -103,8 +106,10 @@ async def main():
     p.add_argument("--shot-num", type=int, default=0, help="Few-Shot のサンプル数")
     p.add_argument("--output-dir", type=Path, required=True, help="出力ディレクトリ")
     p.add_argument("--max-tokens", type=int, default=200, help="最大トークン数")
-    p.add_argument("--n-gpu-layers", type=int, default=-1, help="GPU レイヤ数")
+    p.add_argument("--n-gpu-layers", type=int, default=42, help="GPU レイヤ数")
     p.add_argument("--parallel", type=int, default=8, help="並列処理数")
+    p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
+    p.add_argument("--temperature", type=float, default=0.7, help="生成時の温度（デフォルトは0.1）")
     args = p.parse_args()
 
     # サーバー起動
@@ -112,7 +117,8 @@ async def main():
         str(args.base_model), 
         str(args.lora_model) if args.lora_model else None, 
         args.n_gpu_layers,
-        args.parallel # parallel引数を渡す
+        args.parallel,
+        n_ctx=args.n_ctx
     )
     model_label = args.base_model.parts[2]
     
@@ -128,7 +134,7 @@ async def main():
             
             tasks = [
                 generate_and_parse_with_retry(
-                    item, client, args.template, model_label, args.max_tokens, few_shots
+                    item, client, args.template, model_label, args.max_tokens, few_shots, args.temperature
                 ) 
                 for item in batch
             ]
@@ -164,7 +170,9 @@ async def main():
         "output_dir": str(args.output_dir),
         "max_tokens": args.max_tokens,
         "n_gpu_layers": args.n_gpu_layers,
-        "parallel": args.parallel
+        "parallel": args.parallel,
+        "n_ctx": args.n_ctx,
+        "temperature": args.temperature,
     }
     config_path = out_path.parent / "config.json"
     write_json(config_path, config)

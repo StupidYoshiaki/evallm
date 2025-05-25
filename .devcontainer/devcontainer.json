@@ -14,6 +14,7 @@
       "extensions": [
         "GitHub.copilot",
         "ms-python.python",
+        "ms-toolsai.jupyter",
         "foxundermoon.shell-format",
         "wholroyd.jinja"
       ]

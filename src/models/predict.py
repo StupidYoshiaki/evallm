@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-# src/generator/cli.py
-
+import json
 import argparse
 import logging
 import traceback
@@ -55,15 +53,11 @@ def main():
 
     args = p.parse_args()
 
-    # import sys
-    # print(type(str(args.n_gpu_layers)))
-    # sys.exit()
-
     start_llama_server(str(args.base_model), n_gpu_layers=args.n_gpu_layers)
     model_label = args.base_model.parts[2]
     
     dataset = read_jsonl(args.input)
-    dataset = dataset[:3]  # デバッグ用に最初の10件だけ処理
+    # dataset = dataset[:3]  # デバッグ用に最初の10件だけ処理
 
     results = []
     for item in tqdm(dataset, desc="QA 生成中"):
@@ -105,15 +99,14 @@ def main():
     stop_llama_server()
 
     # 引数の内容を全て config.json に保存
+    config_path = out_path.parent / "config.json"
     config = {
         "base_model": str(args.base_model),
         "template": args.template,
         "input": str(args.input),
-        "output_dir": str(args.output_dir),
         "max_tokens": args.max_tokens,
         "n_gpu_layers": args.n_gpu_layers,
     }
-    config_path = out_path.parent / "config.json"
     write_json(config_path, config)
 
 if __name__ == "__main__":

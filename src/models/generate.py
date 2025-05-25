@@ -62,7 +62,7 @@ def main():
     p = argparse.ArgumentParser(description="QA 生成用 CLI")
     p.add_argument("--base-model", type=Path, required=True,
                    help="Base GGUF モデルファイルパス") # ex: models/generator/gemma-2-9b-it/gguf/base.gguf
-    p.add_argument("--lora-model", type=Path,
+    p.add_argument("--lora-model", type=Path, default=None,
                    help="LoRA 適用後モデルファイルパス（オプション）") # ex: models/generator/gemma-2-9b-it/gguf/2025-05-22/lora.gguf
     
     p.add_argument("--template", type=str, required=True,
@@ -118,7 +118,7 @@ def main():
 
     # 出力パスを決定
     mname = model_label
-    today = datetime.datetime.now().strftime("%Y%m%d")
+    today = datetime.datetime.now().strftime("%Y%m%d%H%M")
     if args.lora_model:
         date_str = args.lora_model.parts[4]
         out_path = args.output_dir / mname / "lora" / date_str / today / "generated.jsonl"
@@ -131,18 +131,18 @@ def main():
     stop_llama_server()
 
     # 引数の内容を全て config.json に保存
+    config_path = out_path.parent / "config.json"
     config = {
         "base_model": str(args.base_model),
         "lora_model": str(args.lora_model) if args.lora_model else None,
         "template": args.template,
         "input": str(args.input),
         "few_shot_input": str(args.few_shot_input) if args.few_shot_input else None,
-        "shot_num": args.shot_num if args.shot_num else None,
+        "shot_num": args.shot_num,
         "output_dir": str(args.output_dir),
         "max_tokens": args.max_tokens,
         "n_gpu_layers": args.n_gpu_layers
     }
-    config_path = out_path.parent / "config.json"
     write_json(config_path, config)
 
 if __name__ == "__main__":

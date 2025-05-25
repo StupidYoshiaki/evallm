@@ -37,11 +37,13 @@ def start_llama_server(
         LLAMA_SERVER_CMD,
         "--host", LLM_HOST,
         "--port", str(LLM_PORT),
-        "--model", base_model
+        "--model", base_model,
+        "--parallel",  "8",
     ]
     if lora_model:
         cmd += ["--lora", lora_model]
     if n_gpu_layers:
+        cmd += ["-c", "2048"]
         cmd += ["--n-gpu-layers", str(n_gpu_layers)]
 
     logging.info(f"llama-server を起動します: {' '.join(cmd)}")
@@ -52,7 +54,7 @@ def start_llama_server(
         stderr=subprocess.STDOUT,
         preexec_fn=os.setsid
     )
-    time.sleep(10)  # サーバー起動待ち
+    time.sleep(15)  # サーバー起動待ち
     logging.info(f"llama-server 起動完了 (PID={_llm_process.pid})")
 
 def stop_llama_server() -> None:

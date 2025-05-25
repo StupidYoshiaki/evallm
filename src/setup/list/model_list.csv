@@ -1,11 +1,11 @@
 repo_id,format,filename,output_dir
-google/gemma-2-9b-it,safetensors,,models/generator
-bartowski/gemma-2-9b-it-GGUF,gguf,gemma-2-9b-it-Q4_K_M.gguf,models/generator
 bartowski/gemma-2-2b-it-GGUF,gguf,gemma-2-2b-it-Q4_K_M.gguf,models/evaluatee
 bartowski/gemma-2-2b-jpn-it-GGUF,gguf,gemma-2-2b-jpn-it-Q4_K_M.gguf,models/evaluatee
 bartowski/Qwen2.5-3B-Instruct-GGUF,gguf,Qwen2.5-3B-Instruct-Q4_K_M.gguf,models/evaluatee
 bartowski/Qwen2.5-7B-Instruct-GGUF,gguf,Qwen2.5-7B-Instruct-Q4_K_M.gguf,models/evaluatee
 bartowski/Qwen2.5-14B-Instruct-GGUF,gguf,Qwen2.5-14B-Instruct-Q4_K_M.gguf,models/evaluatee
-bartowski/Qwen_Qwen3-4B-GGUF,gguf,Qwen_Qwen3-4B-Q4_K_M.gguf,models/evaluatee
-bartowski/Qwen_Qwen3-8B-GGUF,gguf,Qwen_Qwen3-8B-Q4_K_M.gguf,models/evaluatee
+bartowski/Meta-Llama-3-8B-Instruct-GGUF,gguf,Meta-Llama-3-8B-Instruct-Q4_K_M.gguf,models/evaluatee
 bartowski/Meta-Llama-3.1-8B-Instruct-GGUF,gguf,Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf,models/evaluatee
+bartowski/microsoft_Phi-4-mini-instruct-GGUF,gguf,microsoft_Phi-4-mini-instruct-Q4_K_M.gguf,models/evaluatee
+bartowski/phi-4-GGUF,gguf,phi-4-Q4_K_M.gguf,models/evaluatee
+bartowski/aya-23-8B-GGUF,gguf,aya-23-8B-Q4_K_M.gguf,models/evaluatee

@@ -1,98 +1,164 @@
-#!/usr/bin/env python3
-# src/train/cli.py
-
+import json
 import argparse
 import datetime
 import logging
 from pathlib import Path
 
-from ..myutils.parsing import create_training_examples
-from ..myutils.trainer import (
-    prepare_tokenizer, prepare_model_with_lora,
-    train_and_export
-)
+import torch
+from peft import LoraConfig, TaskType, get_peft_model, PeftModel
+from transformers import AutoTokenizer, BitsAndBytesConfig, AutoModelForCausalLM
+from trl import DataCollatorForCompletionOnlyLM, SFTConfig, SFTTrainer
 from transformers.trainer_utils import set_seed
+from datasets import Dataset
+
+from ..myutils.parsing import create_training_examples
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
-def main():
+def train_lora(
+    base_model: Path,
+    dataset_path: Path,
+    user_template: str,
+    assistant_template: str,
+    output_dir: Path,
+    epochs: int,
+    batch_size: int,
+    accum_steps: int,
+    seed: int,
+) -> Path:
     setup_logging()
-    parser = argparse.ArgumentParser(description="LoRA付きモデルの学習＋GGUF変換")
-    parser.add_argument(
-        "--base-model-gguf", type=Path, required=True,
-        help="ベースモデルの GGUF ファイルパス"
-    )
-    parser.add_argument(
-        "--lora-template", type=str, required=True,
-        help="LoRA適用用プロンプト Jinja2 テンプレート名 (例: train_assistant.j2)"
-    )
-    parser.add_argument(
-        "--user-template", type=str, required=True,
-        help="ユーザープロンプト用テンプレート名 (例: train_user.j2)"
-    )
-    parser.add_argument(
-        "--dataset", type=Path, required=True,
-        help="学習用データ JSONL ファイルパス"
-    )
-    parser.add_argument(
-        "--output-dir", type=Path, default=Path("models/generator"),
-        help="生成モデル出力先ディレクトリ"
-    )
-    parser.add_argument("--epochs", type=int, default=1, help="学習エポック数")
-    parser.add_argument("--batch-size", type=int, default=2, help="バッチサイズ")
-    parser.add_argument("--accum-steps", type=int, default=8, help="勾配蓄積ステップ数")
-    parser.add_argument("--seed", type=int, default=42, help="乱数シード")
+    # シード固定
+    set_seed(seed)
 
-    args = parser.parse_args()
-
-    # 乱数シード固定
-    set_seed(args.seed)
-
-    # トークナイザ＆事前処理
-    tokenizer = prepare_tokenizer(str(args.base_model_gguf))
-    examples = create_training_examples(
-        str(args.dataset),
-        tokenizer,
-        args.user_template,
-        args.lora_template
+    # トークナイザの設定
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model,
+        attn_implementation='eager',
+        add_eos_token=True,
     )
-
-    # LoRA 設定
-    from peft import LoraConfig, TaskType
-    peft_conf = LoraConfig(
-        r=128,
-        lora_alpha=128,
-        lora_dropout=0.05,
-        task_type=TaskType.CAUSAL_LM,
-        target_modules=[
-            "q_proj","k_proj","v_proj","o_proj",
-            "gate_proj","up_proj","down_proj"
-        ],
-    )
-
-    # モデル準備
-    model = prepare_model_with_lora(str(args.base_model_gguf), peft_conf)
-
-    # 出力ディレクトリを日付ベースで作成
-    # LoRA テンプレート名に日付を含める場合はそちらを使う
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    model_name = args.base_model_gguf.stem
-    out_dir = args.output_dir / model_name / "lora" / today
-
-    # 学習＋マージ＋GGUF 変換
-    final_gguf = train_and_export(
-        model=model,
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens({'pad_token': tokenizer.eos_token})
+    
+    # collator の設定, resoponse_template の部分のみ損失計算を適用させる
+    collator = DataCollatorForCompletionOnlyLM(
+        instruction_template="<start_of_turn>user\n",
+        response_template="<start_of_turn>model\n",
         tokenizer=tokenizer,
-        examples=examples,
-        output_dir=out_dir,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        accum_steps=args.accum_steps,
-        base_gguf_path=args.base_model_gguf
     )
 
-    logging.info(f"最終GGUFモデル: {final_gguf}")
+    # データセットの読み込み
+    train_dataset = create_training_examples(
+        dataset_path, tokenizer,
+        user_template, assistant_template
+    )
+    train_dataset = Dataset.from_list(train_dataset)
+
+    # import sys
+    # print(collator(train_dataset[0]["messages"]))
+    # sys.exit()
+
+    # 量子化をモデルに適用
+    quant = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model,
+        quantization_config=quant,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        use_cache=False,
+        attn_implementation="eager"
+    )
+    model.resize_token_embeddings(len(tokenizer))
+
+    # LoRA パラメータ設定
+    peft_conf = LoraConfig(
+        r=128, lora_alpha=128, lora_dropout=0.05,
+        task_type=TaskType.CAUSAL_LM,
+        target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]
+    )
+
+    # 学習パラメータ設定
+    sft_conf = SFTConfig(
+        output_dir=output_dir,
+        bf16=True,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=batch_size,
+        gradient_accumulation_steps=accum_steps,
+        gradient_checkpointing=True,
+        optim="paged_adamw_8bit",
+        learning_rate=3e-4,
+        lr_scheduler_type="cosine",
+        max_grad_norm=0.3,
+        warmup_ratio=0.1,
+        logging_steps=1000,
+        save_steps=1000,
+        save_total_limit=1,
+    )
+
+    # chat テンプレートの適用関数
+    def formatting_func(example):
+        return tokenizer.apply_chat_template(example['messages'], tokenize=False)
+    
+    # 学習
+    trainer = SFTTrainer(
+        model, 
+        train_dataset=train_dataset,
+        data_collator=collator,
+        args=sft_conf,
+        peft_config=peft_conf,
+        processing_class=tokenizer,
+        formatting_func=formatting_func,
+    )
+    trainer.train()
+
+    # LoRA マージ
+    logging.info("LoRA をベースにマージします")
+    if isinstance(model, PeftModel):
+        model.merge_and_unload()
+    merged_pt = output_dir / "merged_lora.pt"
+    torch.save(model.state_dict(), merged_pt)
+    logging.info(f"マージ済み重み保存: {merged_pt}")
+
+    return merged_pt
+
+def main():
+    p = argparse.ArgumentParser(description="LoRA 学習スクリプト")
+    p.add_argument("--base-model", required=True, help="ベースモデルパス")
+    p.add_argument("--dataset", required=True, help="JSONL データセットパス")
+    p.add_argument("--user-template", required=True, help="ユーザーテンプレート .j2")
+    p.add_argument("--assistant-template", required=True, help="アシスタントテンプレート .j2")
+    p.add_argument("--epochs", type=int, default=1)
+    p.add_argument("--batch-size", type=int, default=2)
+    p.add_argument("--accum-steps", type=int, default=8)
+    p.add_argument("--seed", type=int, default=42)
+    args = p.parse_args()
+
+    # ベースモデルパスの親ディレクトリに出力ディレクトリを作成
+    base_model_path = Path(args.base_model)
+    output_dir = base_model_path.parent / datetime.datetime.now().strftime("%Y%m%d") / "lora" 
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    merged = train_lora(
+        base_model_path,
+        args.dataset,
+        args.user_template,
+        args.assistant_template,
+        output_dir,
+        args.epochs,
+        args.batch_size,
+        args.accum_steps,
+        args.seed
+    )
+    print(merged)
+
+    # 引数の内容を全て config.json に保存
+    config_path = output_dir.parent / "config.json"
+    with config_path.open("w") as f:
+        json.dump(vars(args), f, indent=4)
 
 if __name__ == "__main__":
     main()

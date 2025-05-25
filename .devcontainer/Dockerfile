@@ -11,7 +11,7 @@ WORKDIR /opt/llama
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     git build-essential cmake libcurl4-openssl-dev ocl-icd-opencl-dev opencl-headers \
     libclblast-dev libopenblas-dev \
-    tmux tree curl jq\
+    tmux tree curl jq psmisc \
  && rm -rf /var/lib/apt/lists/*
 
 ARG LLAMA_CUDA_ARCH="75"
@@ -20,6 +20,7 @@ RUN git clone https://github.com/ggml-org/llama.cpp.git . \
  && cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_CUDA=on \
+      -DGGML_CUDA_FORCE_CUBLAS=ON \
       -DCMAKE_CUDA_ARCHITECTURES=${LLAMA_CUDA_ARCH} \
       -DLLAMA_ENABLE_HTTP=on \
       -DLLAMA_BUILD_EXAMPLES=OFF \

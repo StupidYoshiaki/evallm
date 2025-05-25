@@ -82,7 +82,7 @@ find "$EVALUATEE_DIR" -mindepth 3 -maxdepth 3 -type f -name "base.gguf" | while 
   echo "       --template \"$TEMPLATE\" \\"
   echo "       --input \"$INPUT_FILE\" \\"
   echo "       --output-dir \"$OUT_DIR\" \\"
-  echo "       --n-gpu-layers -1 \\"
+  echo "       --n-gpu-layers 42 \\"
   printf "       %s\n" "${POSITIONAL[@]}"
 
   python -m src.models.predict \
@@ -90,7 +90,7 @@ find "$EVALUATEE_DIR" -mindepth 3 -maxdepth 3 -type f -name "base.gguf" | while 
     --template "$TEMPLATE" \
     --input "$INPUT_FILE" \
     --output-dir "$OUT_DIR" \
-    --n-gpu-layers -1 \
+    --n-gpu-layers 42 \
     "${POSITIONAL[@]}"
 
   echo "✔ 完了: $MODEL_NAME → $OUT_DIR"

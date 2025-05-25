@@ -4,6 +4,7 @@ transformers
 torch
 trl
 peft
+bitsandbytes
 datasets
 huggingface-hub
 pydantic
@@ -11,3 +12,4 @@ tqdm
 Jinja2
 pathlib
 python-dotenv
+llama-cpp-python

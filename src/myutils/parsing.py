@@ -65,7 +65,11 @@ def create_training_examples(
             question=rec['question'],
             answer=rec['answer']
         )
-        examples.append([{"role":"user","content":user},
-                         {"role":"assistant","content":assistant}])
+        examples.append({
+            "messages": [
+                {"role":"user","content":user},
+                {"role":"assistant","content":assistant}
+            ]
+        })
     return examples
 

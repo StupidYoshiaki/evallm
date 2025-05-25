@@ -12,6 +12,7 @@ from transformers.trainer_utils import set_seed
 from datasets import Dataset
 
 from ..myutils.parsing import create_training_examples
+from ..myutils.io import write_json
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -133,7 +134,7 @@ def main():
     p.add_argument("--assistant-template", required=True, help="アシスタントテンプレート .j2")
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--batch-size", type=int, default=2)
-    p.add_argument("--accum-steps", type=int, default=8)
+    p.add_argument("--accum-steps", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 
@@ -156,9 +157,19 @@ def main():
     print(merged)
 
     # 引数の内容を全て config.json に保存
-    config_path = output_dir.parent / "config.json"
-    with config_path.open("w") as f:
-        json.dump(vars(args), f, indent=4)
+    config = {
+        "base_model": str(base_model_path),
+        "dataset": str(Path(args.dataset).resolve()),
+        "user_template": args.user_template,
+        "assistant_template": args.assistant_template,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "accum_steps": args.accum_steps,
+        "seed": args.seed,
+    }
+    config_path = output_dir / "config.json"
+    write_json(config_path, config)
+    
 
 if __name__ == "__main__":
     main()

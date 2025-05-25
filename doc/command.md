@@ -20,5 +20,10 @@ python -m src.models.predict --base-model models/generator/gemma-2-9b-it/gguf/ba
 
 ## script
 ```
-./script/predict.sh -i data/JSQuAD/eval/baseline.jsonl -t evaluatee.j2 -p 8081
+./script/predict.sh -i data/JSQuAD/eval/baseline.jsonl -t evaluatee.j2
+```
+
+## うまくllama-serverが立てられない時
+```
+ps aux | grep llama-server
 ```

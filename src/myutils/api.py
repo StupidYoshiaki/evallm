@@ -24,10 +24,10 @@ def start_llama_server(
     n_gpu_layers: int = None,
     parallel: int = 8,
     n_ctx: int = 2048,
-    timeout: int = 60 # サーバー起動のタイムアウト（秒）
+    timeout: int = 300 # サーバー起動のタイムアウト（秒）
 ) -> None:
     """
-    llama-serverを起動し、ヘルスチェックエンドポイントで準備が完了するまで待機する。
+    llama-serverを起動し、ヘルスチェックエンドポイントで準備が完了するまで待機する（修正版）。
     """
     global _llm_process
     if _llm_process is not None and _llm_process.poll() is None:
@@ -35,66 +35,57 @@ def start_llama_server(
         return
 
     cmd = [
-        LLAMA_SERVER_CMD,
-        "--host", LLM_HOST,
-        "--port", str(LLM_PORT),
-        "--model", base_model,
-        "--parallel", str(parallel),
-        "-c", str(n_ctx),
+        LLAMA_SERVER_CMD, "--host", LLM_HOST, "--port", str(LLM_PORT),
+        "--model", base_model, "--parallel", str(parallel), "-c", str(n_ctx),
     ]
     if lora_model:
         cmd += ["--lora", lora_model]
-    if n_gpu_layers is not None: # n_gpu_layers=0 も有効な値なので is not None でチェック
+    if n_gpu_layers is not None:
         cmd += ["--n-gpu-layers", str(n_gpu_layers)]
 
     logging.info(f"llama-server を起動します: {' '.join(cmd)}")
     _llm_process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE, # ログをキャプチャするためにPIPEに変更
-        stderr=subprocess.STDOUT,
-        text=True, # テキストモードで読み込む
-        preexec_fn=os.setsid
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, preexec_fn=os.setsid
     )
 
     health_check_url = f"http://{LLM_HOST}:{LLM_PORT}/health"
-    logging.info(f"サーバーが準備完了になるのを待ちます... (エンドポイント: {health_check_url})")
+    logging.info(f"サーバーが準備完了になるのを待ちます... (エンドポイント: {health_check_url}, タイムアウト: {timeout}秒)")
     
     start_time = time.monotonic()
-    is_ready = False
-
-    # タイムアウトまで1秒ごとにヘルスチェック
-    for _ in range(timeout):
-        # まずプロセスが予期せず終了していないか確認
+    
+    # タイムアウトまでポーリング
+    for i in range(timeout):
         if _llm_process.poll() is not None:
             logging.error("llama-serverが起動中に予期せず終了しました。")
-            # サーバーのログを出力してデバッグしやすくする
             stdout, _ = _llm_process.communicate()
             logging.error(f"サーバーログ:\n{stdout}")
             raise RuntimeError("llama-serverの起動に失敗しました。")
 
         try:
-            # 同期的なhttpxクライアントでヘルスチェック
             with httpx.Client() as client:
                 response = client.get(health_check_url, timeout=1.0)
             
-            # ステータスコード200 かつ JSONボディが{"status": "ok"}なら準備完了
             if response.status_code == 200 and response.json().get("status") == "ok":
-                is_ready = True
-                break
-        except (httpx.ConnectError, httpx.ReadTimeout):
-            # サーバーがまだ接続を受け付けていないか、タイムアウトした場合はリトライ
-            time.sleep(1)
-        except Exception as e:
-            logging.warning(f"ヘルスチェック中に予期せぬエラー: {e}")
-            time.sleep(1)
+                elapsed_time = time.monotonic() - start_time
+                logging.info(f"llama-server 起動完了 (PID={_llm_process.pid}, 所要時間: {elapsed_time:.2f}秒)")
+                return
 
-    elapsed_time = time.monotonic() - start_time
-    if is_ready:
-        logging.info(f"llama-server 起動完了 (PID={_llm_process.pid}, 所要時間: {elapsed_time:.2f}秒)")
-    else:
-        logging.error(f"タイムアウト({timeout}秒)以内に llama-server が起動しませんでした。")
-        stop_llama_server() # ゾンビプロセスを残さないように停止を試みる
-        raise TimeoutError("llama-serverの起動に失敗しました。")
+        except httpx.ConnectError:
+            # 接続できない場合は、まだ起動中なので何もしない（ループの最後でsleepする）
+            pass
+        except Exception as e:
+            # その他の予期せぬエラー
+            logging.warning(f"ヘルスチェック中に予期せぬエラー: {e}")
+        
+        # ★★★ 成功してreturnしなかった場合は、必ず1秒待つ ★★★
+        if i < timeout - 1: # 最後のループでは待たない
+            time.sleep(1)
+        else:
+            # タイムアウトに達した場合
+            logging.error(f"タイムアウト({timeout}秒)以内に llama-server が起動しませんでした。")
+            stop_llama_server()
+            raise TimeoutError("llama-serverの起動に失敗しました。")
 
 def stop_llama_server() -> None:
     """

@@ -139,11 +139,12 @@ async def main():
     # 出力パス決定とファイル書き込み
     mname = model_label
     today = datetime.datetime.now().strftime("%Y%m%d%H%M")
-    if args.lora_model:
-        # パス構造が深くなる可能性を考慮し、存在確認と作成を行う
-        out_dir = args.output_dir / mname / "lora" / args.lora_model.parent.name / today
-    else:
-        out_dir = args.output_dir / mname / "base" / today
+    out_dir = args.output_dir / mname / today
+    # if args.lora_model:
+    #     # パス構造が深くなる可能性を考慮し、存在確認と作成を行う
+    #     out_dir = args.output_dir / mname / "lora" / args.lora_model.parent.name / today
+    # else:
+    #     out_dir = args.output_dir / mname / "base" / today
     
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "generated.jsonl"
@@ -153,8 +154,19 @@ async def main():
     stop_llama_server()
 
     # 設定ファイル保存
+    config = {
+        "base_model": str(args.base_model),
+        "lora_model": str(args.lora_model) if args.lora_model else None,
+        "template": args.template,
+        "input": str(args.input),
+        "few_shot_input": str(args.few_shot_input) if args.few_shot_input else None,
+        "shot_num": args.shot_num,
+        "output_dir": str(args.output_dir),
+        "max_tokens": args.max_tokens,
+        "n_gpu_layers": args.n_gpu_layers,
+        "parallel": args.parallel
+    }
     config_path = out_path.parent / "config.json"
-    config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     write_json(config_path, config)
 
 if __name__ == "__main__":

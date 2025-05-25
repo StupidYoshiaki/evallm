@@ -6,6 +6,7 @@ from pathlib import Path
 from tqdm import tqdm
 import asyncio
 import httpx
+import sys
 
 from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm
 from ..myutils.parsing import build_messages, parse_json_objects
@@ -51,8 +52,11 @@ async def generate_and_parse_with_retry(
                 logging.info(f"{RETRY_DELAY}秒後に再試行します…")
                 await asyncio.sleep(RETRY_DELAY) # サーバー負荷軽減のため少し待つ
             else:
-                logging.error(f"id={item['id']} は最大試行回数に達したためスキップします。")
-                return None # 最大リトライ回数に達したらNoneを返す
+                logging.error(f"id={item['id']} は最大試行回数に達したため強制終了します。")
+                sys.stderr.write(
+                    f"エラー: {e}\n"
+                    f"トレースバック:\n{traceback.format_exc()}\n"
+                )
             
     return None
 
@@ -104,7 +108,7 @@ async def main():
             out_path = args.output_dir / dname / "baseline" / mname / "prediction.jsonl"
         case "generated.jsonl":
             gmname = args.input.parts[3]
-            date_str = args.input.parts[5]
+            date_str = args.input.parts[4]
             out_path = args.output_dir / dname / "generated" / gmname / date_str / mname / "prediction.jsonl"
         case _:
             logging.error("不明な入力ファイル形式です")

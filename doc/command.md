@@ -13,6 +13,11 @@ python -m src.data.preprocess --input data/JSQuAD/train.jsonl --output data/JSQu
 python -m src.models.train --base-model models/generator/gemma-2-9b-it/safetensors/base --user-template train_user.j2 --assistant-template train_assistant.j2 --dataset data/JSQuAD/train/preprocessed.jsonl
 ```
 
+## predict
+```
+python -m src.models.predict --base-model models/generator/gemma-2-9b-it/gguf/base.gguf --template evaluatee.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir output --n-gpu-layers 42
+```
+
 ## script
 ```
 ./script/predict.sh -i data/JSQuAD/eval/baseline.jsonl -t evaluatee.j2 -p 8081

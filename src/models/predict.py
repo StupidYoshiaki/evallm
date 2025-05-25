@@ -4,6 +4,8 @@ import logging
 import traceback
 from pathlib import Path
 from tqdm import tqdm
+import asyncio
+import httpx
 
 from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm
 from ..myutils.parsing import build_messages, parse_json_objects
@@ -11,75 +13,90 @@ from ..myutils.io import read_jsonl, write_jsonl, write_json
 from ..myutils.logging import setup_logging
 
 MAX_RETRIES = 10 # 最大リトライ回数
+RETRY_DELAY = 2 # 再試行までの待機時間（秒）
 
-def process_item(item: dict, template: str, model_label: str, max_tokens: int) -> dict:
-    messages = build_messages(template, question=item["question"], context=item["context"])
-    resp = generate_from_llm(
-        messages=messages,
-        model=model_label,
-        max_tokens=max_tokens
-    )
-    text = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+async def generate_and_parse_with_retry(
+    item: dict, 
+    client: httpx.AsyncClient, 
+    template: str, 
+    model_label: str, 
+    max_tokens: int
+) -> dict | None:
+    """
+    1個のアイテムに対してLLMからの生成とJSONパースを行い、失敗した場合はリトライする。
+    """
+    retries = 0
+    while retries < MAX_RETRIES:
+        try:
+            # LLMにリクエストを送信
+            messages = build_messages(template, question=item["question"], context=item["context"])
+            resp_data = await generate_from_llm(
+                client=client,
+                messages=messages,
+                model=model_label,
+                max_tokens=max_tokens
+            )
+            text = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return {
+                "id": item["id"],
+                "context": item["context"],
+                "question": item["question"],
+                "answer": text, # パースした結果のanswerを使う
+            }
+            
+        except Exception as e:
+            retries += 1
+            logging.warning(f"id={item['id']} でエラー ({retries}/{MAX_RETRIES}): {e}")
+            if retries < MAX_RETRIES:
+                logging.info(f"{RETRY_DELAY}秒後に再試行します…")
+                await asyncio.sleep(RETRY_DELAY) # サーバー負荷軽減のため少し待つ
+            else:
+                logging.error(f"id={item['id']} は最大試行回数に達したためスキップします。")
+                return None # 最大リトライ回数に達したらNoneを返す
+            
+    return None
 
-    # objs = parse_json_objects(text)
-    # if not objs:
-    #     logging.warning(f"id={item['id']} で JSON 抜き出せず")
-    #     return {"id": item["id"], "context": item["context"], "qa": []}
-    # gen = objs[0]
-
-    content = {
-        "id": item["id"],
-        "context": item["context"],
-        "question": item["question"],
-        "answer": text,
-    }
-
-    return content
-
-def main():
+async def main():
     setup_logging()
     p = argparse.ArgumentParser(description="QA 生成用 CLI")
-    p.add_argument("--base-model", type=Path, required=True,
-                   help="Base GGUF モデルファイルパス") # ex: models/generator/gemma-2-9b-it/gguf/base.gguf
-    p.add_argument("--template", type=str, required=True,
-                   help="プロンプト Jinja2 テンプレート名 (.j2)")
-    p.add_argument("--input", type=Path, required=True,
-                   help="入力 JSON ファイルパス") # ex: data/JSQuAD/eval/baseline.jsonl, data/JSQuAD/eval/[model_name]/lora/[date]/generated.jsonl
-    p.add_argument("--output-dir", type=Path, required=True,
-                   help="出力ディレクトリ")
+    p.add_argument("--base-model", type=Path, required=True, help="Base GGUF モデルファイルパス")
+    p.add_argument("--template", type=str, required=True, help="プロンプト Jinja2 テンプレート名 (.j2)")
+    p.add_argument("--input", type=Path, required=True, help="入力 JSON ファイルパス")
+    p.add_argument("--output-dir", type=Path, required=True, help="出力ディレクトリ")
     p.add_argument("--max-tokens", type=int, default=200)
-    p.add_argument("--n-gpu-layers", type=int, default=None,
-                   help="GPU レイヤ数")
+    p.add_argument("--n-gpu-layers", type=int, default=None, help="GPU レイヤ数")
+    p.add_argument("--parallel", type=int, default=8, help="並列処理数")
+    p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
 
     args = p.parse_args()
 
-    start_llama_server(str(args.base_model), n_gpu_layers=args.n_gpu_layers)
-    model_label = args.base_model.parts[2]
+    # parallel引数をサーバー起動時に渡す
+    start_llama_server(str(args.base_model), n_gpu_layers=args.n_gpu_layers, parallel=args.parallel, n_ctx=args.n_ctx)
+    model_label = args.base_model.parts[-3]
     
     dataset = read_jsonl(args.input)
-    # dataset = dataset[:3]  # デバッグ用に最初の10件だけ処理
+    # dataset = dataset[:10]  # デバッグ用
 
     results = []
-    for item in tqdm(dataset, desc="QA 生成中"):
-        retries = 0
-        success = False
-        while retries < MAX_RETRIES and not success:
-            try:
-                content = process_item(
-                    item, args.template, model_label, args.max_tokens
-                )
-                results.append(content)
-                success = True
-            except Exception as e:
-                retries += 1
-                logging.error(f"id={item['id']} でエラー ({retries}/{MAX_RETRIES}): {e}")
-                logging.debug(traceback.format_exc())
-                if retries < MAX_RETRIES:
-                    logging.info("再試行します…")
-        if not success:
-            logging.warning(f"id={item['id']} は最大試行回数に達したためスキップします")
+    # httpx.AsyncClientを一度だけ生成し、使い回す
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        for i in tqdm(range(0, len(dataset), args.parallel), desc="QA 生成中"):
+            batch = dataset[i:i+args.parallel]
+            
+            # バッチ内の各アイテムに対して、リトライ機能付きのワーカータスクを作成
+            tasks = [
+                generate_and_parse_with_retry(
+                    item, client, args.template, model_label, args.max_tokens
+                ) 
+                for item in batch
+            ]
+            
+            # バッチ内のタスクを並列実行
+            batch_results = await asyncio.gather(*tasks)
+            
+            # Noneでない成功した結果だけをresultsに追加
+            results.extend([res for res in batch_results if res is not None])
 
-    # 出力パスを決定
     dname = args.input.parts[1]
     mname = model_label
     match args.input.parts[-1]:
@@ -91,14 +108,12 @@ def main():
             out_path = args.output_dir / dname / "generated" / gmname / date_str / mname / "prediction.jsonl"
         case _:
             logging.error("不明な入力ファイル形式です")
+            stop_llama_server()
             return
         
     write_jsonl(out_path, results)
-
-    # サーバー停止
     stop_llama_server()
 
-    # 引数の内容を全て config.json に保存
     config_path = out_path.parent / "config.json"
     config = {
         "base_model": str(args.base_model),
@@ -106,8 +121,11 @@ def main():
         "input": str(args.input),
         "max_tokens": args.max_tokens,
         "n_gpu_layers": args.n_gpu_layers,
+        "parallel": args.parallel,
+        "n_ctx": args.n_ctx,
     }
     write_json(config_path, config)
 
+
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

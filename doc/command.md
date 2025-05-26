@@ -1,9 +1,15 @@
-
+## preprocess
+```
+python -m src.data.preprocess --input data/squad/train.jsonl --output data/squad/train/preprocessed.jsonl
+```
 
 ## download
 ```
 python -m src.setup.downloader.model --repo-id mradermacher/Gemma-2-Llama-Swallow-9b-it-v0.1-i1-GGUF --format gguf --filename Gemma-2-Llama-Swallow-9b-it-v0.1.i1-Q4_K_M
 .gguf --output-dir models/generator 
+```
+```
+python -m src.setup.downloader.data --dataset-id rajpurkar/squad --splits train,validation --output-dir data
 ```
 ```
 python -m src.setup.download_all --model-list src/setup/list/model_list.csv --dataset-list src/setup/list/dataset_list.csv

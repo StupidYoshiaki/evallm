@@ -8,10 +8,9 @@ from tqdm import tqdm
 import asyncio
 import httpx
 
-# 以下のimportは、お客様のプロジェクト構成に合わせてください
 from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm, handle_error
-from ..myutils.parsing import build_messages, parse_json_objects # ここでは堅牢なパース関数が使われる
-from ..myutils.io import read_jsonl, write_jsonl, write_json
+from ..myutils.parsing import build_messages, parse_json_objects 
+from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
 
 MAX_RETRIES = 10 # 最大リトライ回数
@@ -108,10 +107,11 @@ async def main():
     p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
     p.add_argument("--temperature", type=float, default=0.7, help="生成時の温度（デフォルトは0.1）")
     p.add_argument("--log-filename", type=str, default=None, help="ログファイル名")
+    p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
     args = p.parse_args()
 
     # ログ設定
-    setup_logging(filename=args.log_filename)
+    setup_logging(filename=args.log_filename, log_type=args.log_type)
 
     # サーバー起動
     start_llama_server(
@@ -174,9 +174,10 @@ async def main():
         "parallel": args.parallel,
         "n_ctx": args.n_ctx,
         "temperature": args.temperature,
+        "log_filename": args.log_filename,
+        "log_type": args.log_type,
     }
-    config_path = out_path.parent / "config.json"
-    write_json(config_path, config)
+    write_config(out_dir, config)
 
 if __name__ == "__main__":
     asyncio.run(main())

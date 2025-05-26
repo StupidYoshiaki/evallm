@@ -39,15 +39,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from huggingface_hub import hf_hub_download, snapshot_download
 from ...myutils.logging import setup_logging
-
-def write_config(target_dir: Path, info: dict):
-    """
-    config.json にモデル取得情報を書き込む
-    """
-    cfg_path = target_dir / "config.json"
-    with cfg_path.open('w', encoding='utf-8') as f:
-        json.dump(info, f, ensure_ascii=False, indent=2)
-    logging.info(f"config.json を作成しました: {cfg_path}")
+from ...myutils.io import write_config
 
 
 def download_gguf(repo_id: str, filename: str, revision: str, output_dir: Path):

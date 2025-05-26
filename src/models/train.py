@@ -12,7 +12,7 @@ from transformers.trainer_utils import set_seed
 from datasets import Dataset
 
 from ..myutils.parsing import create_training_examples
-from ..myutils.io import write_json
+from ..myutils.io import write_json, write_config
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -167,8 +167,7 @@ def main():
         "accum_steps": args.accum_steps,
         "seed": args.seed,
     }
-    config_path = output_dir / "config.json"
-    write_json(config_path, config)
+    write_config(output_dir, config)
     
 
 if __name__ == "__main__":

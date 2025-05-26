@@ -44,3 +44,12 @@ def write_json(path: Path, data: Union[Dict, List]) -> None:
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     logging.info(f"出力データを書き出しました: {path}")
+
+def write_config(target_dir: Path, info: dict):
+    """
+    config.json にモデル取得情報を書き込む
+    """
+    cfg_path = target_dir / "config.json"
+    with cfg_path.open('w', encoding='utf-8') as f:
+        json.dump(info, f, ensure_ascii=False, indent=2)
+    logging.info(f"config.json を作成しました: {cfg_path}")

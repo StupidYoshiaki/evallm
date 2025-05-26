@@ -7,7 +7,7 @@ import httpx
 
 from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm, handle_error
 from ..myutils.parsing import build_messages
-from ..myutils.io import read_jsonl, write_jsonl, write_json
+from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
 
 MAX_RETRIES = 10 # 最大リトライ回数
@@ -115,7 +115,6 @@ async def main():
     write_jsonl(out_path, results)
     stop_llama_server()
 
-    config_path = out_path.parent / "config.json"
     config = {
         "base_model": str(args.base_model),
         "template": args.template,
@@ -125,8 +124,7 @@ async def main():
         "parallel": args.parallel,
         "n_ctx": args.n_ctx,
     }
-    write_json(config_path, config)
-
-
+    write_config(out_path.parent, config)
+    
 if __name__ == "__main__":
     asyncio.run(main())

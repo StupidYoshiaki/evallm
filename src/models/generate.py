@@ -1,17 +1,15 @@
-import sys
 import json
 import random
 import argparse
 import datetime
 import logging
-import traceback
 from pathlib import Path
 from tqdm import tqdm
 import asyncio
 import httpx
 
 # 以下のimportは、お客様のプロジェクト構成に合わせてください
-from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm
+from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm, handle_error
 from ..myutils.parsing import build_messages, parse_json_objects # ここでは堅牢なパース関数が使われる
 from ..myutils.io import read_jsonl, write_jsonl, write_json
 from ..myutils.logging import setup_logging
@@ -32,7 +30,7 @@ def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
     for item in dataset:
         shot = {
             "question": item["question"],
-            "answer": json.dumps({"question": item["question"], "answer": item["answer"]}, ensure_ascii=False)
+            "answer": item["answer"]
         }
         examples.append(json.dumps(shot, ensure_ascii=False))
     
@@ -79,7 +77,7 @@ async def generate_and_parse_with_retry(
                 else:
                     raise ValueError("生成されたJSONに必要な'question'または'answer'キーがありません。")
             else:
-                # logging.info(f"レスポンステキスト: {text}")
+                logging.info(f"レスポンステキスト: {text}")
                 raise ValueError("生成されたテキストから有効なJSONを抽出できませんでした。")
 
         except Exception as e:
@@ -90,13 +88,12 @@ async def generate_and_parse_with_retry(
                 await asyncio.sleep(RETRY_DELAY)
             else:
                 logging.error(f"id={item['id']} は最大試行回数に達したため強制終了します。")
-                sys.exit(0)  # 強制終了
+                handle_error() # 強制終了
     return None
 
 
 async def main():
     """非同期処理のメインロジック"""
-    setup_logging()
     p = argparse.ArgumentParser(description="QA 生成用 CLI")
     p.add_argument("--base-model", type=Path, required=True, help="Base GGUF モデルファイルパス")
     p.add_argument("--lora-model", type=Path, default=None, help="LoRA 適用後モデルファイルパス（オプション）")
@@ -110,7 +107,11 @@ async def main():
     p.add_argument("--parallel", type=int, default=8, help="並列処理数")
     p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
     p.add_argument("--temperature", type=float, default=0.7, help="生成時の温度（デフォルトは0.1）")
+    p.add_argument("--log-filename", type=str, default=None, help="ログファイル名")
     args = p.parse_args()
+
+    # ログ設定
+    setup_logging(filename=args.log_filename)
 
     # サーバー起動
     start_llama_server(

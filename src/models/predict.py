@@ -1,15 +1,12 @@
-import json
 import argparse
 import logging
-import traceback
 from pathlib import Path
 from tqdm import tqdm
 import asyncio
 import httpx
-import sys
 
-from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm
-from ..myutils.parsing import build_messages, parse_json_objects
+from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm, handle_error
+from ..myutils.parsing import build_messages
 from ..myutils.io import read_jsonl, write_jsonl, write_json
 from ..myutils.logging import setup_logging
 
@@ -55,7 +52,7 @@ async def generate_and_parse_with_retry(
                 await asyncio.sleep(RETRY_DELAY) # サーバー負荷軽減のため少し待つ
             else:
                 logging.error(f"id={item['id']} は最大試行回数に達したため強制終了します。")
-                sys.exit(0)  # 強制終了
+                handle_error() # 強制終了
             
     return None
 

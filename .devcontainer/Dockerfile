@@ -11,7 +11,7 @@ WORKDIR /opt/llama
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     git build-essential cmake libcurl4-openssl-dev ocl-icd-opencl-dev opencl-headers \
     libclblast-dev libopenblas-dev \
-    tmux tree curl jq psmisc \
+    tmux tree curl jq psmisc ping \
  && rm -rf /var/lib/apt/lists/*
 
 ARG LLAMA_CUDA_ARCH="75"

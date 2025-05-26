@@ -130,7 +130,7 @@ async def generate_from_llm(
     resp = await client.post(url, headers=HEADERS, json=payload)
     resp.raise_for_status()
     data = resp.json()
-    logging.debug(f"レスポンス: {data}")
+    logging.debug(f"データ: {data}")
     return data
 
 # SIGINT (Ctrl-C) をキャッチして、llama-server を停止する

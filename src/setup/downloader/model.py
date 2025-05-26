@@ -28,6 +28,7 @@ GGUF形式またはsafetensors形式のモデルをHugging Face Hubまたは直�
     * 各 <model_name> ディレクトリに config.json を生成し、取得元情報を記載
   - --url 指定時、URL直接ダウンロード
 """
+import re
 import os
 import json
 import argparse
@@ -56,6 +57,8 @@ def download_gguf(repo_id: str, filename: str, revision: str, output_dir: Path):
     """
     repo_name = repo_id.split("/")[-1]
     repo_name = repo_name.replace("-GGUF", "")  # GGUFを削除
+    # もし末尾に -id (dは自然数) などがあれば削除
+    repo_name = re.sub(r'-i\d*$', '', repo_name)
     model_dir = output_dir / repo_name
     model_dir.mkdir(parents=True, exist_ok=True)
 

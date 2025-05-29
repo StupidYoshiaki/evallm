@@ -38,6 +38,11 @@ python -m src.models.predict --base-model models/generator/gemma-2-9b-it/gguf/ba
 ./script/predict.sh -i data/JSQuAD/eval/baseline.jsonl -t evaluatee.j2
 ```
 
+## evaluate
+```
+python -m src.data.corr --file1 output/JSQuAD/baseline/ranking.md --file2 output/JSQuAD/generated/gemma-2-9b-it/202505251436/ranking.md
+```
+
 ## うまくllama-serverが立てられない時
 ```
 ps aux | grep llama-server

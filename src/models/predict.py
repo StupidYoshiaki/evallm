@@ -123,6 +123,7 @@ async def main():
         "n_gpu_layers": args.n_gpu_layers,
         "parallel": args.parallel,
         "n_ctx": args.n_ctx,
+        "temperature": args.temperature,
     }
     write_config(out_path.parent, config)
     

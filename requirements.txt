@@ -14,3 +14,5 @@ pathlib
 python-dotenv
 llama-cpp-python
 httpx
+sentencepiece
+scipy

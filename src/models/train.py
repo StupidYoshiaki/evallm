@@ -117,14 +117,14 @@ def train_lora(
     trainer.train()
 
     # LoRA マージ
-    logging.info("LoRA をベースにマージします")
-    if isinstance(model, PeftModel):
-        model.merge_and_unload()
-    merged_pt = output_dir / "merged_lora.pt"
-    torch.save(model.state_dict(), merged_pt)
-    logging.info(f"マージ済み重み保存: {merged_pt}")
+    # logging.info("LoRA をベースにマージします")
+    # if isinstance(model, PeftModel):
+    #     model.merge_and_unload()
+    # merged_pt = output_dir / "merged_lora.pt"
+    # torch.save(model.state_dict(), merged_pt)
+    # logging.info(f"マージ済み重み保存: {merged_pt}")
 
-    return merged_pt
+    # return merged_pt
 
 def main():
     p = argparse.ArgumentParser(description="LoRA 学習スクリプト")
@@ -143,7 +143,7 @@ def main():
     output_dir = base_model_path.parent / datetime.datetime.now().strftime("%Y%m%d") / "lora" 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    merged = train_lora(
+    train_lora(
         base_model_path,
         args.dataset,
         args.user_template,
@@ -154,7 +154,6 @@ def main():
         args.accum_steps,
         args.seed
     )
-    print(merged)
 
     # 引数の内容を全て config.json に保存
     config = {

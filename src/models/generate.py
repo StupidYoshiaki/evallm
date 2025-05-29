@@ -13,7 +13,7 @@ from ..myutils.parsing import build_messages, parse_json_objects
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
 
-MAX_RETRIES = 10 # 最大リトライ回数
+MAX_RETRIES = 100 # 最大リトライ回数
 RETRY_DELAY = 1 # 再試行までの待機時間（秒）
 
 def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
@@ -23,6 +23,7 @@ def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
     
     dataset = read_jsonl(few_shot_input)
     # shot_numがデータセットのサイズより大きい場合、全データを使う
+    random.seed(42)  # 再現性のためにシードを固定
     dataset = random.sample(dataset, min(shot_num, len(dataset)))
     
     examples = []
@@ -48,9 +49,10 @@ async def generate_and_parse_with_retry(
     1個のアイテムに対してLLMからの生成とJSONパースを行い、失敗した場合はリトライする非同期ワーカー関数。
     """
     retries = 0
+    context_value = item.get("context")
     while retries < MAX_RETRIES:
         try:
-            messages = build_messages(template, context=item["context"], examples=few_shots)
+            messages = build_messages(template, context=context_value, examples=few_shots)
             resp_data = await generate_from_llm(
                 client=client,
                 messages=messages,
@@ -66,10 +68,10 @@ async def generate_and_parse_with_retry(
             if parsed_json_list:
                 gen = parsed_json_list[0]
                 if "question" in gen and "answer" in gen:
-                    logging.info(f"id={item['id']} の処理に成功しました。")
+                    logging.info(f"id={item.get('id')} の処理に成功しました。")
                     return {
-                        "id": item["id"],
-                        "context": item["context"],
+                        "id": item.get("id"),
+                        "context": item.get("context"),
                         "question": gen["question"],
                         "answer": gen["answer"],
                     }
@@ -81,12 +83,12 @@ async def generate_and_parse_with_retry(
 
         except Exception as e:
             retries += 1
-            logging.warning(f"id={item['id']} でエラー ({retries}/{MAX_RETRIES}): {e}")
+            logging.warning(f"id={item.get('id')} でエラー ({retries}/{MAX_RETRIES}): {e}")
             if retries < MAX_RETRIES:
                 logging.info(f"{RETRY_DELAY}秒後に再試行します…")
                 await asyncio.sleep(RETRY_DELAY)
             else:
-                logging.error(f"id={item['id']} は最大試行回数に達したため強制終了します。")
+                logging.error(f"id={item.get('id')} は最大試行回数に達したため強制終了します。")
                 handle_error() # 強制終了
     return None
 
@@ -106,7 +108,7 @@ async def main():
     p.add_argument("--parallel", type=int, default=8, help="並列処理数")
     p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
     p.add_argument("--temperature", type=float, default=0.7, help="生成時の温度（デフォルトは0.1）")
-    p.add_argument("--log-filename", type=str, default=None, help="ログファイル名")
+    p.add_argument("--log-filename", type=Path, default=None, help="ログファイル名")
     p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
     args = p.parse_args()
 
@@ -147,11 +149,6 @@ async def main():
     mname = model_label
     today = datetime.datetime.now().strftime("%Y%m%d%H%M")
     out_dir = args.output_dir / mname / today
-    # if args.lora_model:
-    #     # パス構造が深くなる可能性を考慮し、存在確認と作成を行う
-    #     out_dir = args.output_dir / mname / "lora" / args.lora_model.parent.name / today
-    # else:
-    #     out_dir = args.output_dir / mname / "base" / today
     
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "generated.jsonl"

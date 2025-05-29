@@ -11,7 +11,7 @@ readonly OUTPUT_ROOT="${PROJECT_ROOT}/output"
 # これらはコマンドライン引数で上書き可能
 INPUT_FILE=""
 TEMPLATE=""
-LLM_PORT="8080"
+LLM_PORT="8081"
 N_GPU_LAYERS=42
 PARALLEL=8
 N_CTX=2048

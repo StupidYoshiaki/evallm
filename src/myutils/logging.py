@@ -1,7 +1,8 @@
 import os
 import logging
+from pathlib import Path
 
-def setup_logging(filename: str = None, log_type: str = "info") -> None:
+def setup_logging(filename: Path = None, log_type: str = "info") -> None:
     # ファイルが存在する場合は削除
     if filename and os.path.exists(filename):
         os.remove(filename)

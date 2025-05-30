@@ -42,6 +42,10 @@ python -m src.models.predict --base-model models/generator/gemma-2-9b-it/gguf/ba
 ```
 python -m src.data.corr --file1 output/JSQuAD/baseline/ranking.md --file2 output/JSQuAD/generated/gemma-2-9b-it/202505251436/ranking.md
 ```
+```
+python -m src.models.evaluate --ground-truth-file data/JSQuAD/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202505270601/generated.jsonl --prediction-base-dir output/JSQuAD/generated/L
+lama-3.1-Swallow-8B-Instruct-v0.3/202505270601
+```
 
 ## うまくllama-serverが立てられない時
 ```

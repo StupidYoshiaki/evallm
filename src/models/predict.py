@@ -10,7 +10,7 @@ from ..myutils.parsing import build_messages
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
 
-MAX_RETRIES = 10 # 最大リトライ回数
+MAX_RETRIES = 100 # 最大リトライ回数
 RETRY_DELAY = 1 # 再試行までの待機時間（秒）
 
 async def generate_and_parse_with_retry(

@@ -1,3 +1,4 @@
+import os
 import json
 import argparse
 import datetime
@@ -6,19 +7,51 @@ from pathlib import Path
 
 import torch
 from peft import LoraConfig, TaskType, get_peft_model, PeftModel
-from transformers import AutoTokenizer, BitsAndBytesConfig, AutoModelForCausalLM
+from transformers import AutoTokenizer, BitsAndBytesConfig, AutoModelForCausalLM, AutoConfig
 from trl import DataCollatorForCompletionOnlyLM, SFTConfig, SFTTrainer
 from transformers.trainer_utils import set_seed
 from datasets import Dataset
 
 from ..myutils.parsing import create_training_examples
 from ..myutils.io import write_json, write_config
+from ..myutils.logging import setup_logging
 
-def setup_logging():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+# GPU 0とGPU 1を利用可能にする
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+
+TEMPLATE = {
+    "gemma": "<start_of_turn>model\n",
+    "swallow": "<|start_header_id|>assistant<|end_header_id|>\n\n",
+}
+
+def set_device_map(base_model_path: Path) -> dict:
+    config = AutoConfig.from_pretrained(base_model_path)
+    num_layers = config.num_hidden_layers # Llama-Swallowの場合、ログから42と分かっている
+    
+    logging.info(f"モデルのレイヤー数: {num_layers}")
+
+    # device_mapを手動で構築
+    device_map = {}
+    # 入力埋め込みと最初の半分のレイヤーをGPU 0に
+    device_map["model.embed_tokens"] = 0
+    layers_on_gpu0 = num_layers // 2 
+    for i in range(layers_on_gpu0):
+        device_map[f"model.layers.{i}"] = 0
+    
+    # 残りのレイヤーと最終ノーマライゼーション層をGPU 1に
+    for i in range(layers_on_gpu0, num_layers):
+        device_map[f"model.layers.{i}"] = 1
+    device_map["model.norm"] = 1
+    
+    # ★★★ LMヘッドをGPU 0に強制的に配置 ★★★
+    device_map["lm_head"] = 0
+    
+    logging.info(f"手動device_mapを構築しました: {device_map}")
+    return device_map
 
 def train_lora(
     base_model: Path,
+    model_type: str,
     dataset_path: Path,
     user_template: str,
     assistant_template: str,
@@ -28,7 +61,6 @@ def train_lora(
     accum_steps: int,
     seed: int,
 ) -> Path:
-    setup_logging()
     # シード固定
     set_seed(seed)
 
@@ -39,27 +71,45 @@ def train_lora(
         add_eos_token=True,
     )
     if tokenizer.pad_token is None:
-        tokenizer.add_special_tokens({'pad_token': tokenizer.eos_token})
-    
-    # collator の設定, resoponse_template の部分のみ損失計算を適用させる
-    collator = DataCollatorForCompletionOnlyLM(
-        instruction_template="<start_of_turn>user\n",
-        response_template="<start_of_turn>model\n",
-        tokenizer=tokenizer,
-    )
+        logging.info("pad_tokenがNoneのため、eos_tokenをpad_tokenとして設定します。")
+        tokenizer.pad_token = tokenizer.eos_token
+    logging.info(f"Chat template: {tokenizer.chat_template}")
 
-    # データセットの読み込み
-    train_dataset = create_training_examples(
+    logging.info("データセットを作成し、チャットテンプレートを適用・トークン化します...")
+    training_examples_with_messages_key = create_training_examples(
         dataset_path, tokenizer,
         user_template, assistant_template
     )
-    train_dataset = Dataset.from_list(train_dataset)
+    processed_dataset_for_trainer = []
+    for example_item in training_examples_with_messages_key:
+        tokenized_sample = tokenizer.apply_chat_template(
+            example_item['messages'],
+            tokenize=True,
+            add_generation_prompt=False,
+            return_tensors=None, # リストを返すように
+            return_dict=True, # {'input_ids': ..., 'attention_mask': ...} の形式
+            # max_length=1024, # 必要に応じてここでmax_lengthを指定
+            # truncation=True,   # max_lengthを超える場合切り捨て
+        )
+        processed_dataset_for_trainer.append(tokenized_sample)
+    train_dataset = Dataset.from_list(processed_dataset_for_trainer)
+    logging.info(f"トークン化済みデータセット作成完了。サンプル数: {len(train_dataset)}")
+    
+    assistant_response_prefix_str = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+    response_template_ids = tokenizer.encode(assistant_response_prefix_str, add_special_tokens=False)
+    collator = DataCollatorForCompletionOnlyLM(
+        response_template=response_template_ids, # トークンIDのリスト
+        tokenizer=tokenizer,
+        # instruction_template もIDで指定するとより堅牢だが、response_templateがIDなら通常不要
+    )
 
     # import sys
-    # print(collator(train_dataset[0]["messages"]))
+    # print(train_dataset[:2])
+    # print(collator(train_dataset[:2]["input_ids"])["labels"])
     # sys.exit()
 
     # 量子化をモデルに適用
+    logging.info(f"ベースモデルをロード中: {base_model}")
     quant = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -69,7 +119,7 @@ def train_lora(
         base_model,
         quantization_config=quant,
         torch_dtype=torch.bfloat16,
-        device_map="auto",
+        device_map=set_device_map(base_model),
         use_cache=False,
         attn_implementation="eager"
     )
@@ -98,12 +148,9 @@ def train_lora(
         logging_steps=1000,
         save_steps=1000,
         save_total_limit=1,
+        dataset_kwargs={"skip_prepare_dataset": True},
     )
 
-    # chat テンプレートの適用関数
-    def formatting_func(example):
-        return tokenizer.apply_chat_template(example['messages'], tokenize=False)
-    
     # 学習
     trainer = SFTTrainer(
         model, 
@@ -112,31 +159,63 @@ def train_lora(
         args=sft_conf,
         peft_config=peft_conf,
         processing_class=tokenizer,
-        formatting_func=formatting_func,
     )
+
+    # ... (SFTTrainerの初期化後、trainer.train() の直前) ...
+    logging.info(f"--- Llama-Swallow デバイス配置確認 ---")
+    # SFTTrainerによってpeftモデルが準備されているはずなので、trainer.modelで確認
+    peft_model = trainer.model 
+    logging.info(f"PEFTモデルクラス: {peft_model.__class__.__name__}")
+    logging.info(f"PEFTモデル全体のデバイス (最初のパラメータ): {next(peft_model.parameters()).device}")
+
+    # ベースモデルの主要コンポーネントのデバイスを確認
+    base_model_proper = peft_model.base_model.model # 通常、この下に実際のトランスフォーマーブロックがある
+    
+    logging.info(f"入力埋め込みデバイス: {base_model_proper.get_input_embeddings().weight.device}")
+
+    lm_head_to_check = None
+    if hasattr(base_model_proper, 'lm_head') and base_model_proper.lm_head is not None:
+        lm_head_to_check = base_model_proper.lm_head
+        logging.info(f"LMヘッド (base_model_proper.lm_head) のデバイス: {lm_head_to_check.weight.device}")
+    elif hasattr(base_model_proper, 'get_output_embeddings') and base_model_proper.get_output_embeddings() is not None:
+        # Gemmaなど、get_output_embeddings()がLMヘッドを返す場合
+        lm_head_to_check = base_model_proper.get_output_embeddings()
+        logging.info(f"出力埋め込み (LMヘッド) のデバイス: {lm_head_to_check.weight.device}")
+    else:
+        logging.warning("LMヘッドの特定が困難でした。モデル構造を確認してください。")
+
+    try:
+        first_layer_device = next(iter(base_model_proper.model.layers[0].parameters())).device
+        last_layer_device = next(iter(base_model_proper.model.layers[-1].parameters())).device
+        logging.info(f"最初のトランスフォーマーレイヤーのデバイス: {first_layer_device}")
+        logging.info(f"最後のトランスフォーマーレイヤーのデバイス: {last_layer_device}")
+    except Exception as e:
+        logging.warning(f"レイヤーのデバイス取得中にエラー: {e}")
+    
+    logging.info(f"--- 確認終了 ---")
+
+    logging.info("LoRA学習を開始します...")
+
     trainer.train()
 
-    # LoRA マージ
-    # logging.info("LoRA をベースにマージします")
-    # if isinstance(model, PeftModel):
-    #     model.merge_and_unload()
-    # merged_pt = output_dir / "merged_lora.pt"
-    # torch.save(model.state_dict(), merged_pt)
-    # logging.info(f"マージ済み重み保存: {merged_pt}")
-
-    # return merged_pt
 
 def main():
     p = argparse.ArgumentParser(description="LoRA 学習スクリプト")
     p.add_argument("--base-model", required=True, help="ベースモデルパス")
+    p.add_argument("--model-type", type=str, default="swallow", choices=["gemma", "swallow"], help="モデルタイプ")
     p.add_argument("--dataset", required=True, help="JSONL データセットパス")
     p.add_argument("--user-template", required=True, help="ユーザーテンプレート .j2")
     p.add_argument("--assistant-template", required=True, help="アシスタントテンプレート .j2")
     p.add_argument("--epochs", type=int, default=1)
-    p.add_argument("--batch-size", type=int, default=2)
-    p.add_argument("--accum-steps", type=int, default=4)
+    p.add_argument("--batch-size", type=int, default=1)
+    p.add_argument("--accum-steps", type=int, default=8)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--log-filename", type=Path, default=None, help="ログファイル名")
+    p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
     args = p.parse_args()
+
+    # ログ設定
+    setup_logging(filename=args.log_filename, log_type=args.log_type)
 
     # ベースモデルパスの親ディレクトリに出力ディレクトリを作成
     base_model_path = Path(args.base_model)
@@ -145,6 +224,7 @@ def main():
 
     train_lora(
         base_model_path,
+        args.model_type,
         args.dataset,
         args.user_template,
         args.assistant_template,

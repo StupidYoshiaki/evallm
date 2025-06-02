@@ -50,6 +50,7 @@ def cut_token_length(tokenizer: PreTrainedTokenizer, text: str, max_length: int)
 
 def create_training_examples(
     jsonl_path: str,
+    model_type: str,
     tokenizer: PreTrainedTokenizer,
     user_template: str,
     assistant_template: str,
@@ -59,10 +60,14 @@ def create_training_examples(
     examples = []
     for rec in raw:
         ctx = cut_token_length(tokenizer, rec['context'], max_length)
-        user = render_prompt(user_template, context=ctx)
+        user = render_prompt(
+            user_template, 
+            context=ctx, 
+            question=rec['question'] if model_type == "predictor" else None
+        )
         assistant = render_prompt(
             assistant_template,
-            question=rec['question'],
+            question=rec['question'] if model_type == "generator" else None,
             answer=rec['answer']
         )
         examples.append({
@@ -71,5 +76,8 @@ def create_training_examples(
                 {"role":"assistant","content":assistant}
             ]
         })
+        # import sys
+        # print(examples)
+        # sys.exit()
     return examples
 

@@ -77,7 +77,7 @@ def train_lora(
 
     logging.info("データセットを作成し、チャットテンプレートを適用・トークン化します...")
     training_examples_with_messages_key = create_training_examples(
-        dataset_path, tokenizer,
+        dataset_path, model_type, tokenizer,
         user_template, assistant_template
     )
     processed_dataset_for_trainer = []
@@ -202,7 +202,7 @@ def train_lora(
 def main():
     p = argparse.ArgumentParser(description="LoRA 学習スクリプト")
     p.add_argument("--base-model", required=True, help="ベースモデルパス")
-    p.add_argument("--model-type", type=str, default="swallow", choices=["gemma", "swallow"], help="モデルタイプ")
+    p.add_argument("--model-type", type=str, default="generator", choices=["generator", "predictor"], help="モデルタイプ")
     p.add_argument("--dataset", required=True, help="JSONL データセットパス")
     p.add_argument("--user-template", required=True, help="ユーザーテンプレート .j2")
     p.add_argument("--assistant-template", required=True, help="アシスタントテンプレート .j2")
@@ -220,7 +220,7 @@ def main():
     # ベースモデルパスの親ディレクトリに出力ディレクトリを作成
     base_model_path = Path(args.base_model)
     output_dir = base_model_path.parent / datetime.datetime.now().strftime("%Y%m%d") / "lora" 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=False)
 
     train_lora(
         base_model_path,
@@ -238,6 +238,7 @@ def main():
     # 引数の内容を全て config.json に保存
     config = {
         "base_model": str(base_model_path),
+        "model_type": args.model_type,
         "dataset": str(Path(args.dataset).resolve()),
         "user_template": args.user_template,
         "assistant_template": args.assistant_template,

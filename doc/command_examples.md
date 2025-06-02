@@ -28,6 +28,11 @@ python -m src.models.train --base-model models/generator/gemma-2-9b-it/safetenso
 python -m src.models.generate --base-model models/generator/gemma-2-9b-it/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 
+# convert
+```
+python ../opt/llama/convert_lora_to_gguf.py models/generator/gemma-2-9b-it/safetensors/20250526/lora/checkpoint-7858 --outfile models/generator/gemma-2-9b-it/gguf/lora-20250526.gguf --base models/generator/gemma-2-9b-it/safetensors/base
+```
+
 ## predict
 ```
 python -m src.models.predict --base-model models/generator/gemma-2-9b-it/gguf/base.gguf --template evaluatee.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir output --n-gpu-layers 42

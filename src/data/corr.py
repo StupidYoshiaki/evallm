@@ -82,8 +82,8 @@ def calculate_rank_correlation(file1_path: Path, file2_path: Path) -> None:
     correlation, p_value = spearmanr(aligned_ranks1, aligned_ranks2)
 
     print("\n===== 順位相関係数 結果 =====")
-    print(f"ファイル1: {file1_path.name}")
-    print(f"ファイル2: {file2_path.name}")
+    print(f"ファイル1: {file1_path}")
+    print(f"ファイル2: {file2_path}")
     print(f"共通モデル数: {len(common_models)}")
     print(f"スピアマンの順位相関係数 (ρ): {correlation:.4f}")
     print(f"P値: {p_value:.4f}")

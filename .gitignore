@@ -5,3 +5,5 @@
 /output/
 __pycache__/
 core.*
+/exp/*.jsonl
+/exp/*

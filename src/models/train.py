@@ -219,7 +219,7 @@ def main():
 
     # ベースモデルパスの親ディレクトリに出力ディレクトリを作成
     base_model_path = Path(args.base_model)
-    output_dir = base_model_path.parent / datetime.datetime.now().strftime("%Y%m%d") / "lora" 
+    output_dir = base_model_path.parent / "lora" / datetime.datetime.now().strftime("%Y%m%d") 
     output_dir.mkdir(parents=True, exist_ok=False)
 
     train_lora(

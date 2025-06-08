@@ -116,7 +116,7 @@ def calculate_ifd_score(model, tokenizer, instruction, answer):
 # ---- メイン処理の例 ----
 if __name__ == "__main__":
     # モデル名とトークナイザー名を指定 (Hugging Face Hubから)
-    model_name = "models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base" # 例: Llama-2-7B (アクセスには注意)
+    model_name = "models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250606/checkpoint-2000" # 例: Llama-2-7B (アクセスには注意)
     # model_name = "stabilityai/japanese-stablelm-instruct-gamma-7b" # 例: 日本語モデル
 
     # トークナイザーとモデルのロード

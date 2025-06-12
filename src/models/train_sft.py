@@ -51,6 +51,7 @@ def set_device_map(base_model_path: Path) -> dict:
 
 def train_lora(
     base_model: Path,
+    resume_from_checkpoint: Path | None,
     model_type: str,
     dataset_path: Path,
     user_template: str,
@@ -196,17 +197,23 @@ def train_lora(
 
     logging.info("LoRA学習を開始します...")
 
-    trainer.train()
+    if resume_from_checkpoint:
+        logging.info(f"チェックポイントから学習を再開: {resume_from_checkpoint}")
+        trainer.train(resume_from_checkpoint=str(resume_from_checkpoint))
+    else:
+        logging.info("新規学習を開始します。")
+        trainer.train()
 
 
 def main():
     p = argparse.ArgumentParser(description="LoRA 学習スクリプト")
     p.add_argument("--base-model", required=True, help="ベースモデルパス")
+    p.add_argument("--resume-from-checkpoint", type=Path, default=None, help="学習を再開するチェックポイントのパス")
     p.add_argument("--model-type", type=str, default="generator", choices=["generator", "predictor"], help="モデルタイプ")
     p.add_argument("--dataset", required=True, help="JSONL データセットパス")
     p.add_argument("--user-template", required=True, help="ユーザーテンプレート .j2")
     p.add_argument("--assistant-template", required=True, help="アシスタントテンプレート .j2")
-    p.add_argument("--epochs", type=int, default=1)
+    p.add_argument("--epochs", type=int, default=1) # 学習を再開させる場合、1 epoch以上の値に設定する
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--accum-steps", type=int, default=8)
     p.add_argument("--seed", type=int, default=42)
@@ -224,6 +231,7 @@ def main():
 
     train_lora(
         base_model_path,
+        args.resume_from_checkpoint,
         args.model_type,
         args.dataset,
         args.user_template,
@@ -238,6 +246,7 @@ def main():
     # 引数の内容を全て config.json に保存
     config = {
         "base_model": str(base_model_path),
+        "resume_from_checkpoint": str(args.resume_from_checkpoint) if args.resume_from_checkpoint else None,
         "model_type": args.model_type,
         "dataset": str(Path(args.dataset).resolve()),
         "user_template": args.user_template,

@@ -16,3 +16,5 @@ llama-cpp-python
 httpx
 sentencepiece
 scipy
+sentence_transformers
+janome

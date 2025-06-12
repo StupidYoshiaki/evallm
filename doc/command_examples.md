@@ -22,6 +22,12 @@ python -m src.data.preprocess --input data/JSQuAD/train.jsonl --output data/JSQu
 ```
 python -m src.models.train --base-model models/generator/gemma-2-9b-it/safetensors/base --user-template train_user.j2 --assistant-template train_assistant.j2 --dataset data/JSQuAD/train/preprocessed.jsonl
 ```
+```
+python -m src.models.train --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --resume-from-checkpoint models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250602/checkpoint-10950 --model-type generator --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --dataset data/JSQuAD/train/preprocessed.jsonl --epochs 2
+```
+```
+python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --sft-lora-path models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250530/checkpoint-7858 --dataset-path data/ja-wiki/grpo.jsonl --prompt-template-name train_generator_user.j2 --emb-model-path models/embedding/multilingual-e5-large/safetensors/base
+```
 
 ## generate
 ```
@@ -33,6 +39,9 @@ python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B
 ```
 python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250602.gguf --template qa_generator_ja.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
+```
+python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250610.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
 
 # convert
 ```
@@ -40,6 +49,9 @@ python ../opt/llama/convert_lora_to_gguf.py models/generator/gemma-2-9b-it/safet
 ```
 ```
 python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/20250602/lora/checkpoint-10950 --outfile models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250602.gguf --base models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base
+```
+```
+python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250610/checkpoint-15000 --outfile models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250610.gguf --base models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base
 ```
 
 ## predict
@@ -62,6 +74,9 @@ lama-3.1-Swallow-8B-Instruct-v0.3/202505270601
 ```
 ```
 python -m src.data.evaluate --ground-truth-file data/JSQuAD/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202506020258/generated.jsonl --prediction-base-dir output/JSQuAD/generated/Llama-3.1-Swallow-8B-Instruct-v0.3/202506020258 --llm-judge-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf
+```
+```
+LLM_PORT=8081 python -m src.data.evaluate --ground-truth-file data/JSQuAD/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202506020258/generated.jsonl --prediction-base-dir output/JSQuAD/generated/Llama-3.1-Swallow-8B-Instruct-v0.3/202506020258 --llm-judge-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf
 ```
 
 ## うまくllama-serverが立てられない時

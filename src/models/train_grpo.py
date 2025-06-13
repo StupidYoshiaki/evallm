@@ -16,11 +16,11 @@ from janome.tokenizer import Tokenizer as JanomeTokenizer
 from ..myutils.parsing import render_prompt, parse_json_objects, create_grpo_examples
 from ..myutils.logging import setup_logging
 
-# --- 1. ロギングとシードの設定 ---
+# --- ロギングとシードの設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 torch.manual_seed(42)
 
-# --- 2. 報酬システムの定義 ---
+# --- 報酬システムの定義 ---
 class QARewardSystem:
     """
     QA生成タスクのための複数の報酬を計算するクラス（リファクタリング版）。
@@ -48,22 +48,17 @@ class QARewardSystem:
 
     def _get_parsed_json(self, completion_text: str) -> dict | None:
         """JSONパースを試み、成功すれば辞書を、失敗すればNoneを返す。"""
-        try:
-            parsed_list = parse_json_objects(completion_text)
-        
-            # リストが空でなく、最初の要素が存在する場合
-            if parsed_list:
-                first_json_obj = parsed_list[0]
-                if "question" in first_json_obj and "answer" in first_json_obj:
-                    return first_json_obj # 最初の有効なJSONオブジェクトを返す
-            
-            # 有効なJSONが見つからなかった場合
-            logging.warning(f"有効なQAペアを含むJSONが見つかりませんでした。")
-            return None
+        parsed_list = parse_json_objects(completion_text)
     
-        except (json.JSONDecodeError, ValueError):
-            logging.warning(f"JSONパース失敗。テキスト: {completion_text[:100]}...")
-            return None
+        # リストが空でなく、最初の要素が存在する場合
+        if parsed_list:
+            first_json_obj = parsed_list[0]
+            if "question" in first_json_obj and "answer" in first_json_obj:
+                return first_json_obj # 最初の有効なJSONオブジェクトを返す
+        
+        # 有効なJSONが見つからなかった場合
+        logging.warning(f"有効なQAペアを含むJSONが見つかりませんでした。テキスト: {completion_text[:100]}...")
+        return None
 
     def _get_extractability_reward(self, generated_answer: str, context: str) -> float:
         """答えが文脈から抽出可能か評価する。"""
@@ -124,7 +119,7 @@ class QARewardSystem:
         return final_rewards
 
 
-# --- 4. メイン実行ブロック ---
+# --- メイン実行ブロック ---
 def main():
     p = argparse.ArgumentParser(description="SFT済みLoRAモデルをGRPOで追加学習するスクリプト")
     p.add_argument("--base-model-path", type=Path, required=True, help="元のベースモデルのHugging Faceパス")
@@ -135,6 +130,8 @@ def main():
     
     # 学習ハイパーパラメータ
     p.add_argument("--learning-rate", type=float, default=1e-5, help="学習率")
+    p.add_argument("--max-prompt-length", type=int, default=1024, help="プロンプトの最大長")
+    p.add_argument("--max-completion-length", type=int, default=256, help="生成する最大トークン数")
     p.add_argument("--epochs", type=int, default=1, help="学習エポック数")
     p.add_argument("--batch-size", type=int, default=1, help="バッチサイズ")
     p.add_argument("--accum-steps", type=int, default=8, help="勾配累積ステップ数")
@@ -176,7 +173,7 @@ def main():
         jsonl_path=args.dataset_path,
         tokenizer=tokenizer,
         prompt_template=args.prompt_template_name,
-        max_length=1024, # プロンプト+生成の最大長
+        max_length=args.max_prompt_length
     )
     train_dataset = Dataset.from_list(train_examples)
     reward_system = QARewardSystem(device=model.device) # モデルと同じデバイスに報酬計算モデルを配置
@@ -195,6 +192,10 @@ def main():
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
         learning_rate=args.learning_rate,
+        num_generations=8,
+        temperature=1.0,
+        max_prompt_length=args.max_prompt_length, # プロンプトの最大長
+        max_completion_length=args.max_completion_length, # 生成する最大トークン数
         beta=args.beta, # GRPOの正則化項
         logging_steps=10,
         save_strategy="epoch",
@@ -208,10 +209,6 @@ def main():
         processing_class=tokenizer,
         train_dataset=train_dataset,
         reward_funcs=reward_system, # 報酬計算クラスのインスタンスを渡す
-        # prompt_col="prompt", # データセット内のプロンプト列の名前
-        # num_iterations=2, # 各プロンプトに対して生成・評価・学習を繰り返す回数
-        # max_length=1024, # プロンプト+生成の最大長
-        # max_new_tokens=256, # 生成する最大トークン数
     )
     
     # --- 学習開始 ---
@@ -220,7 +217,7 @@ def main():
     
     # --- モデル保存 ---
     logging.info("学習が完了しました。最終モデルを保存します。")
-    trainer.save_model(str(args.output_dir))
+    trainer.save_model(output_dir)
 
 if __name__ == "__main__":
     main()

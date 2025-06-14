@@ -14,6 +14,7 @@ from sentence_transformers import SentenceTransformer, util
 from janome.tokenizer import Tokenizer as JanomeTokenizer
 
 from ..myutils.parsing import render_prompt, parse_json_objects, create_grpo_examples
+from ..myutils.io import write_json, write_config
 from ..myutils.logging import setup_logging
 
 # --- ロギングとシードの設定 ---
@@ -152,7 +153,11 @@ def main():
     
     # --- モデルとトークナイザのロード ---
     logging.info(f"ベースモデルをロード中: {args.base_model_path}")
-    quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True, 
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model_path,
         quantization_config=quantization_config,
@@ -216,8 +221,27 @@ def main():
     trainer.train()
     
     # --- モデル保存 ---
-    logging.info("学習が完了しました。最終モデルを保存します。")
-    trainer.save_model(output_dir)
+    # logging.info("学習が完了しました。最終モデルを保存します。")
+    # trainer.save_model(output_dir)
+
+    # --- config ファイルの書き出し ---
+    config = {
+        "base_model_path": str(args.base_model_path),
+        "sft_lora_path": str(args.sft_lora_path),
+        "emb_model_path": str(args.emb_model_path),
+        "dataset_path": str(args.dataset_path),
+        "prompt_template_name": args.prompt_template_name,
+        "learning_rate": args.learning_rate,
+        "max_prompt_length": args.max_prompt_length,
+        "max_completion_length": args.max_completion_length,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "accum_steps": args.accum_steps,
+        "seed": args.seed,
+        "beta": args.beta,
+    }
+    write_config(output_dir, config)
+
 
 if __name__ == "__main__":
     main()

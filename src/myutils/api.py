@@ -24,7 +24,7 @@ def start_llama_server(
     n_gpu_layers: int = None,
     parallel: int = 8,
     n_ctx: int = 2048,
-    timeout: int = 300 # サーバー起動のタイムアウト（秒）
+    timeout: int = 600 # サーバー起動のタイムアウト（秒）
 ) -> None:
     """
     llama-serverを起動し、ヘルスチェックエンドポイントで準備が完了するまで待機する（修正版）。

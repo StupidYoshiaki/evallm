@@ -20,7 +20,7 @@ python -m src.setup.download_all --model-list src/setup/list/model_list.csv --da
 python -m src.data.preprocess --input data/JSQuAD/train.jsonl --output data/JSQuAD/train/preprocessed.jsonl
 ```
 ```
-python -m src.models.train --base-model models/generator/gemma-2-9b-it/safetensors/base --user-template train_user.j2 --assistant-template train_assistant.j2 --dataset data/JSQuAD/train/preprocessed.jsonl
+python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --dataset data/JSQuAD/train/sft_202506141209.jsonl
 ```
 ```
 python -m src.models.train --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --resume-from-checkpoint models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250602/checkpoint-10950 --model-type generator --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --dataset data/JSQuAD/train/preprocessed.jsonl --epochs 2
@@ -32,6 +32,9 @@ python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swa
 ## generate
 ```
 python -m src.models.generate --base-model models/generator/gemma-2-9b-it/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
+```
+python -m src.models.generate --base-model models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 ```
 python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/20250602/lora/checkpoint-10950 --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
@@ -53,6 +56,16 @@ python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8
 ```
 python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250610/checkpoint-15000 --outfile models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250610.gguf --base models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base
 ```
+```
+python ../opt/llama/convert_hf_to_gguf.py models/generator/llm-jp-3.1-13b-instruct4/safetensors/base --outfile models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --outtype f16
+```
+```
+python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/grpo/20250612/checkpoint-1134 --outfile models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/grpo-20250612.gguf --base models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base
+```
+
+## 注意点
+- convertのために、llama-cppのコードの一部を改変しているので注意
+    - 参考: https://zenn.dev/matsuolab/articles/2857bf0feeeb5d
 
 ## predict
 ```

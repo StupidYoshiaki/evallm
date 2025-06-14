@@ -46,7 +46,7 @@ python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B
 python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250610.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 
-# convert
+## convert
 ```
 python ../opt/llama/convert_lora_to_gguf.py models/generator/gemma-2-9b-it/safetensors/20250526/lora/checkpoint-7858 --outfile models/generator/gemma-2-9b-it/gguf/lora-20250526.gguf --base models/generator/gemma-2-9b-it/safetensors/base
 ```
@@ -62,8 +62,11 @@ python ../opt/llama/convert_hf_to_gguf.py models/generator/llm-jp-3.1-13b-instru
 ```
 python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/grpo/20250612/checkpoint-1134 --outfile models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/grpo-20250612.gguf --base models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base
 ```
+```
+llama-quantize models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf models/generator/llm-jp-3.1-13b-instruct4/gguf/base-Q4_K_M.gguf Q4_K_M
+```
 
-## 注意点
+### 注意点
 - convertのために、llama-cppのコードの一部を改変しているので注意
     - 参考: https://zenn.dev/matsuolab/articles/2857bf0feeeb5d
 

@@ -26,7 +26,8 @@ python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8
 python -m src.models.train --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --resume-from-checkpoint models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250602/checkpoint-10950 --model-type generator --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --dataset data/JSQuAD/train/preprocessed.jsonl --epochs 2
 ```
 ```
-python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --sft-lora-path models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/lora/20250530/checkpoint-7858 --dataset-path data/ja-wiki/grpo.jsonl --prompt-template-name train_generator_user.j2 --emb-model-path models/embedding/multilingual-e5-large/safetensors/base
+python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --sft-lora-path models/generator/Llama-3.1-Swallow-
+8B-Instruct-v0.3/safetensors/sft/20250530/checkpoint-7858 --dataset-path data/ja-wiki/grpo.jsonl --prompt-template-name train_generator_user.j2 --emb-model-path models/embedding/multilingual-e5-large/safetensors/base
 ```
 
 ## generate
@@ -34,13 +35,16 @@ python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swa
 python -m src.models.generate --base-model models/generator/gemma-2-9b-it/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 ```
+python -m src.models.generate --base-model models/generator/Qwen3-8B/gguf/base.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048 --max-tokens 500
+```
+```
 python -m src.models.generate --base-model models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 ```
-python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/20250602/lora/checkpoint-10950 --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
-```
-```
 python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250602.gguf --template qa_generator_ja.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
+```
+python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/grpo-20250612.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 ```
 python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250610.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
@@ -65,10 +69,19 @@ python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8
 ```
 llama-quantize models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf models/generator/llm-jp-3.1-13b-instruct4/gguf/base-Q4_K_M.gguf Q4_K_M
 ```
+```
+ curl https://raw.githubusercontent.com/llm-jp/llm-jp-tokenizer/main/models/ver3.1/llm-jp-tokenizer-100k.ver3.1.model > tokenizer.model
+```
+
 
 ### 注意点
 - convertのために、llama-cppのコードの一部を改変しているので注意
     - 参考: https://zenn.dev/matsuolab/articles/2857bf0feeeb5d
+    - これ参考にしないでください
+- https://note.com/npaka/n/n3e99d2a45a4b
+    - こっちを参考にしてください
+- https://qiita.com/7shi/items/14d24a25aa26dcf97d2d
+    - これも参考にしてください
 
 ## predict
 ```
@@ -78,6 +91,9 @@ python -m src.models.predict --base-model models/generator/gemma-2-9b-it/gguf/ba
 ## script
 ```
 ./script/predict.sh -i data/JSQuAD/eval/baseline.jsonl -t evaluatee.j2
+```
+```
+./script/predict.sh -i data/JSQuAD/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202506141141/generated.jsonl -t evaluatee.j2
 ```
 
 ## evaluate

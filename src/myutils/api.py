@@ -45,8 +45,10 @@ def start_llama_server(
 
     logging.info(f"llama-server を起動します: {' '.join(cmd)}")
     _llm_process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, preexec_fn=os.setsid
+        cmd, 
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, preexec_fn=os.setsid,
+        # stdout=None, stderr=None,
     )
 
     health_check_url = f"http://{LLM_HOST}:{LLM_PORT}/health"

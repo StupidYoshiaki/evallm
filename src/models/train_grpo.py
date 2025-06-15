@@ -102,6 +102,12 @@ class QARewardSystem:
 
             # ステップ2: 各報酬を計算
             extract_reward = self._get_extractability_reward(gen_answer, context)
+            if extract_reward == 0.0:
+                # 抽出可能でない場合は他の報酬も0
+                final_rewards.append(0.0)
+                logging.debug(f"Sample {i}: 抽出可能でないため、報酬は0")
+                continue
+            
             noun_phrase_reward = self._get_noun_phrase_reward(gen_answer)
             relevance_reward = self._get_relevance_reward(gen_question, context)
             

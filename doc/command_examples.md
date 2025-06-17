@@ -9,6 +9,9 @@ python -m src.setup.downloader.model --repo-id mradermacher/Gemma-2-Llama-Swallo
 .gguf --output-dir models/generator 
 ```
 ```
+python -m src.setup.downloader.model --repo-id Qwen/Qwen3-8B --format safetensors --output-dir models/generator
+```
+```
 python -m src.setup.downloader.data --dataset-id rajpurkar/squad --splits train,validation --output-dir data
 ```
 ```

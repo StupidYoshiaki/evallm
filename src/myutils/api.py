@@ -37,6 +37,8 @@ def start_llama_server(
     cmd = [
         LLAMA_SERVER_CMD, "--host", LLM_HOST, "--port", str(LLM_PORT),
         "--model", base_model, "--parallel", str(parallel), "-c", str(n_ctx),
+        # "--reasoning-format", "deepseek"
+        # "--rope-scaling", "yarn", "--rope-scale", "4", "--yarn-orig-ctx", "32768",
     ]
     if lora_model:
         cmd += ["--lora", lora_model]

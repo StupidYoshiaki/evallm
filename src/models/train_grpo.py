@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset, Dataset
-from peft import PeftModel
+from peft import PeftModel, LoraConfig, get_peft_model, TaskType
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from transformers.trainer_utils import set_seed
 from trl import GRPOConfig, GRPOTrainer
@@ -103,7 +103,6 @@ class QARewardSystem:
             # ステップ2: 各報酬を計算
             extract_reward = self._get_extractability_reward(gen_answer, context)
             if extract_reward == 0.0:
-                # 抽出可能でない場合は他の報酬も0
                 final_rewards.append(0.0)
                 logging.debug(f"Sample {i}: 抽出可能でないため、報酬は0")
                 continue
@@ -130,7 +129,7 @@ class QARewardSystem:
 def main():
     p = argparse.ArgumentParser(description="SFT済みLoRAモデルをGRPOで追加学習するスクリプト")
     p.add_argument("--base-model-path", type=Path, required=True, help="元のベースモデルのHugging Faceパス")
-    p.add_argument("--sft-lora-path", type=Path, required=True, help="SFTで学習済みのアダプタのパス (checkpoint-xxxなど)")
+    p.add_argument("--sft-lora-path", type=Path, default=None, help="SFTで学習済みのアダプタのパス (checkpoint-xxxなど)")
     p.add_argument("--emb-model-path", type=Path, required=True, help="埋め込みモデルのパス")
     p.add_argument("--dataset-path", type=Path, required=True, help="学習に使用するJSONLデータセットのパス")
     p.add_argument("--prompt-template-name", required=True, help="ユーザーテンプレート .j2")
@@ -139,6 +138,7 @@ def main():
     p.add_argument("--learning-rate", type=float, default=1e-5, help="学習率")
     p.add_argument("--max-prompt-length", type=int, default=1024, help="プロンプトの最大長")
     p.add_argument("--max-completion-length", type=int, default=256, help="生成する最大トークン数")
+    p.add_argument("--context-length", type=int, default=1024, help="コンテキストの最大長 (トークン数)")
     p.add_argument("--epochs", type=int, default=1, help="学習エポック数")
     p.add_argument("--batch-size", type=int, default=1, help="バッチサイズ")
     p.add_argument("--accum-steps", type=int, default=8, help="勾配累積ステップ数")
@@ -172,13 +172,31 @@ def main():
         attn_implementation="eager", # 対応GPUがない場合は "eager" に変更
     )
     
-    logging.info(f"SFT学習済みLoRAアダプタをロード中: {args.sft_lora_path}")
-    model = PeftModel.from_pretrained(model, str(args.sft_lora_path))
-    
     tokenizer = AutoTokenizer.from_pretrained(args.base_model_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-        
+
+    if args.sft_lora_path is not None:
+        logging.info(f"SFT学習済みLoRAアダプタをロード中: {args.sft_lora_path}")
+        model = PeftModel.from_pretrained(model, str(args.sft_lora_path))
+    else:
+        logging.info("SFTアダプタが指定されていないため、新しいLoRAアダプタを作成して学習します。")
+        # SFT学習時と同様のLoraConfigを定義
+        peft_config = LoraConfig(
+            r=128,
+            lora_alpha=128,
+            lora_dropout=0.05,
+            task_type=TaskType.CAUSAL_LM,
+            # モデルのモジュール名は要確認 (Qwen3ならこれでOKなことが多い)
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        )
+        # ベースモデルに新しいLoRAアダプタを適用
+        model = get_peft_model(model, peft_config)
+        logging.info("新しいLoRAアダプタをモデルに適用しました。")
+    
+    # 学習可能なパラメータがあるか確認
+    model.print_trainable_parameters()
+
     # --- データセットと報酬システムの準備 ---
     train_examples = create_grpo_examples(
         jsonl_path=args.dataset_path,

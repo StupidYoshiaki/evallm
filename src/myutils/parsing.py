@@ -54,12 +54,12 @@ def create_training_examples(
     tokenizer: PreTrainedTokenizer,
     user_template: str,
     assistant_template: str,
-    max_length: int = 1024
+    context_length: int = 1024
 ) -> List[Dict]:
     raw = read_jsonl(Path(jsonl_path))
     examples = []
     for rec in raw:
-        ctx = cut_token_length(tokenizer, rec['context'], max_length)
+        ctx = cut_token_length(tokenizer, rec['context'], context_length)
         user = render_prompt(
             user_template, 
             context=ctx, 
@@ -80,7 +80,6 @@ def create_training_examples(
         # print(examples)
         # sys.exit()
     return examples
-
 
 def create_grpo_examples(
     jsonl_path: Path,

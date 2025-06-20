@@ -12,6 +12,7 @@ from ..myutils.api import start_llama_server, stop_llama_server, generate_from_l
 from ..myutils.parsing import build_messages, parse_json_objects 
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
+import uuid
 
 MAX_RETRIES = 100 # 最大リトライ回数
 RETRY_DELAY = 2 # 再試行までの待機時間（秒）
@@ -70,7 +71,7 @@ async def generate_and_parse_with_retry(
                 if "question" in gen and "answer" in gen:
                     logging.info(f"id={item.get('id')} の処理に成功しました。")
                     return {
-                        "id": item.get("id"),
+                        "id": item.get("id") or str(uuid.uuid4()),  # IDがない場合は新規生成
                         "context": item.get("context"),
                         "question": gen["question"],
                         "answer": gen["answer"],

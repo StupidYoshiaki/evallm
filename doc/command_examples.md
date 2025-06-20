@@ -38,7 +38,8 @@ python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swa
 python -m src.models.generate --base-model models/generator/gemma-2-9b-it/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 ```
-python -m src.models.generate --base-model models/generator/Qwen3-8B/gguf/base.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048 --max-tokens 500
+python -m src.models.generate --base-model models/generator/Qwen3-8B/gguf/base.gguf --template src/prompt/qa_generator_nothing.j2 --input data/nothing/eval/baseline.jsonl data/nothing/eval --n-gpu-layers 42 --parallel 8 --n-ctx 40960 --max-tokens 32768
+
 ```
 ```
 python -m src.models.generate --base-model models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048

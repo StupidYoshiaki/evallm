@@ -135,6 +135,7 @@ def main():
     p.add_argument("--prompt-template-name", required=True, help="ユーザーテンプレート .j2")
     
     # 学習ハイパーパラメータ
+    p.add_argument("--num-generations", type=int, default=8, help="生成するサンプル数")
     p.add_argument("--learning-rate", type=float, default=1e-5, help="学習率")
     p.add_argument("--max-prompt-length", type=int, default=1024, help="プロンプトの最大長")
     p.add_argument("--max-completion-length", type=int, default=256, help="生成する最大トークン数")
@@ -221,7 +222,7 @@ def main():
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
         learning_rate=args.learning_rate,
-        num_generations=8,
+        num_generations=args.num_generations, # 生成するサンプル数
         temperature=1.0,
         max_prompt_length=args.max_prompt_length, # プロンプトの最大長
         max_completion_length=args.max_completion_length, # 生成する最大トークン数

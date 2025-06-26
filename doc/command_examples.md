@@ -17,6 +17,9 @@ python -m src.setup.downloader.data --dataset-id rajpurkar/squad --splits train,
 ```
 python -m src.setup.download_all --model-list src/setup/list/model_list.csv --dataset-list src/setup/list/dataset_list.csv
 ```
+```
+python -m src.data.split -i data/JSQuAD/train.jsonl -r 80 -o1 data/JSQuAD/train/bert_train.jsonl -o2 data/JSQuAD/train/bert_valid.jsonl
+```
 
 ## train
 ```

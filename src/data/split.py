@@ -9,8 +9,8 @@ from ..myutils.logging import setup_logging
 
 def split_jsonl_file(
     input_file: Path,
-    output_file1_name: str,
-    output_file2_name: str,
+    output_path1: str,
+    output_path2: str,
     ratio1: int,
     seed: int | None = None
 ):
@@ -71,11 +71,6 @@ def split_jsonl_file(
     logging.info(f"分割比率 {ratio1}:{100-ratio1} に基づき、{len(lines1)}行 と {len(lines2)}行 に分割します。")
 
     # --- 4. 出力ファイルへの書き込み ---
-    output_dir = input_file.parent # 入力ファイルと同じディレクトリ
-    today = datetime.datetime.now().strftime("%Y%m%d%H%M")
-    output_path1 = output_dir / f"{output_file1_name}_{today}.jsonl"
-    output_path2 = output_dir / f"{output_file2_name}_{today}.jsonl"
-
     try:
         logging.info(f"1つ目のファイルに書き込んでいます: {output_path1}")
         with open(output_path1, 'w', encoding='utf-8') as f:
@@ -109,16 +104,16 @@ if __name__ == "__main__":
         help="1つ目のファイルに割り当てる割合（パーセント）。\n例: 80 を指定すると、約80%%と20%%に分割されます。"
     )
     parser.add_argument(
-        "-o1", "--output1",
+        "-o1", "--output-path1",
         type=str,
         required=True,
-        help="1つ目の出力ファイル名。"
+        help="1つ目の出力パス名。"
     )
     parser.add_argument(
-        "-o2", "--output2",
+        "-o2", "--output-path2",
         type=str,
         required=True,
-        help="2つ目の出力ファイル名。"
+        help="2つ目の出力パス名。"
     )
     parser.add_argument(
         "--seed",
@@ -134,8 +129,8 @@ if __name__ == "__main__":
 
     split_jsonl_file(
         input_file=args.input_file,
-        output_file1_name=args.output1,
-        output_file2_name=args.output2,
+        output_path1=args.output_path1,
+        output_path2=args.output_path2,
         ratio1=args.ratio,
         seed=args.seed
     )

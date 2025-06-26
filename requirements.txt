@@ -18,3 +18,4 @@ sentencepiece
 scipy
 sentence_transformers
 janome
+protobuf

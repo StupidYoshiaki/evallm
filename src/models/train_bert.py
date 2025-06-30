@@ -229,7 +229,7 @@ def run_training(args: argparse.Namespace):
     # 2. トークナイザとモデルの準備
     tokenizer, model = setup_tokenizer_and_model(args.model_path)
 
-    # # 目視確認テスト
+    # # # 目視確認テスト
     # sample_size = min(10, len(raw_datasets["train"]))
     # test_sample = raw_datasets["train"].select(range(sample_size))
     # test_mapping(test_sample, tokenizer, args.max_length)
@@ -244,6 +244,11 @@ def run_training(args: argparse.Namespace):
     
     train_dataset = tokenized_datasets["train"]
     eval_dataset = tokenized_datasets.get("validation") # 検証データが存在する場合に取得
+
+    # print(train_dataset["start_positions"][:10])
+    # print(train_dataset["end_positions"][:10])
+    # import sys
+    # sys.exit()
 
     # 4. 学習引数の設定
     training_args = TrainingArguments(

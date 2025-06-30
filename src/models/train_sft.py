@@ -209,7 +209,7 @@ def main():
     p = argparse.ArgumentParser(description="LoRA 学習スクリプト")
     p.add_argument("--base-model", required=True, help="ベースモデルパス")
     p.add_argument("--resume-from-checkpoint", type=Path, default=None, help="学習を再開するチェックポイントのパス")
-    p.add_argument("--model-type", type=str, default="generator", choices=["generator", "predictor"], help="モデルタイプ")
+    p.add_argument("--model-type", type=str, default="generator", choices=["generator", "predictor", "q_generator"], help="モデルタイプ")
     p.add_argument("--dataset", required=True, help="JSONL データセットパス")
     p.add_argument("--user-template", required=True, help="ユーザーテンプレート .j2")
     p.add_argument("--assistant-template", required=True, help="アシスタントテンプレート .j2")

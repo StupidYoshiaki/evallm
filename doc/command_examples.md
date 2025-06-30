@@ -35,6 +35,9 @@ python -m src.models.train --base-model models/generator/Llama-3.1-Swallow-8B-In
 python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --sft-lora-path models/generator/Llama-3.1-Swallow-
 8B-Instruct-v0.3/safetensors/sft/20250530/checkpoint-7858 --dataset-path data/ja-wiki/grpo.jsonl --prompt-template-name train_generator_user.j2 --emb-model-path models/embedding/multilingual-e5-large/safetensors/base
 ```
+```
+python -m src.models.train_bert --model-path models/extractor/modernbert-ja-310m/safetensors/base --train-dataset-path data/JSQuAD/train/bert_train.jsonl --valid-dataset-path data/JSQuAD/train/bert_valid.jsonl
+```
 
 ## generate
 ```

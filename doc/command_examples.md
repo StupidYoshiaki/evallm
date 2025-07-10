@@ -2,6 +2,9 @@
 ```
 python -m src.data.preprocess --input data/squad/train.jsonl --output data/squad/train/preprocessed.jsonl
 ```
+```
+python -m src.data.split -i data/JSQuAD/train.jsonl -r 80 -o1 data/JSQuAD/pipeline/train/step1/raw.jsonl -o2 data/JSQuAD/pipeline/train/step2/raw.jsonl
+```
 
 ## download
 ```
@@ -37,6 +40,9 @@ python -m src.models.train_grpo --base-model-path models/generator/Llama-3.1-Swa
 ```
 ```
 python -m src.models.train_bert --model-path models/extractor/modernbert-ja-310m/safetensors/base --train-dataset-path data/JSQuAD/train/bert_train.jsonl --valid-dataset-path data/JSQuAD/train/bert_valid.jsonl
+```
+```
+python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --dataset data/JSQuAD/pipeline/train/step1/raw.jsonl
 ```
 
 ## generate
@@ -127,4 +133,10 @@ LLM_PORT=8081 python -m src.data.evaluate --ground-truth-file data/JSQuAD/eval/L
 ## うまくllama-serverが立てられない時
 ```
 ps aux | grep llama-server
+```
+
+# pipelineのコマンドの流れ
+```
+python -m src.data.split -i data/JSQuAD/train.jsonl -r 80 -o1 data/JSQuAD/pipeline/train/step1/raw.jsonl -o2 data/JSQuAD/pipeline/train/step2/raw.jsonl
+python -m src.data.split -i data/JSQuAD/pipeline/train/step1/raw.jsonl -r 80 -o1 data/JSQuAD/pipeline/train/step1/bert_train.jsonl -o2 data/JSQuAD/pipeline/train/step1/bert_valid.jsonl
 ```

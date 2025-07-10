@@ -68,7 +68,7 @@ def create_training_examples(
         assistant = render_prompt(
             assistant_template,
             question=rec['question'] if model_type in ["generator", "q_generator"] else None,
-            answer=rec['answer'] if model_type != "q_generator" else None,
+            answer=rec['answers']["text"][0] if model_type != "q_generator" else None,
         )
         examples.append({
             "messages": [

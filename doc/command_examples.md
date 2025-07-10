@@ -59,6 +59,9 @@ python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B
 ```
 python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/lora-20250610.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
+```
+python -m src.models.generate_and_extract --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250627.gguf --template question_generator_user.j2 --bert-model models/extractor/roberta-base-japanese/safetensors/finetuned/20250708/best_model --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
 
 ## convert
 ```
@@ -111,7 +114,7 @@ python -m src.models.predict --base-model models/generator/gemma-2-9b-it/gguf/ba
 python -m src.data.corr --file1 output/JSQuAD/baseline/ranking.md --file2 output/JSQuAD/generated/gemma-2-9b-it/202505251436/ranking.md
 ```
 ```
-python -m src.models.evaluate --ground-truth-file data/JSQuAD/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202505270601/generated.jsonl --prediction-base-dir output/JSQuAD/generated/L
+python -m src.data.evaluate --ground-truth-file data/JSQuAD/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202505270601/generated.jsonl --prediction-base-dir output/JSQuAD/generated/L
 lama-3.1-Swallow-8B-Instruct-v0.3/202505270601
 ```
 ```

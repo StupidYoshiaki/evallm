@@ -229,7 +229,7 @@ def run_training(args: argparse.Namespace):
     # 2. トークナイザとモデルの準備
     tokenizer, model = setup_tokenizer_and_model(args.model_path)
 
-    # # # 目視確認テスト
+    # # 目視確認テスト
     # sample_size = min(10, len(raw_datasets["train"]))
     # test_sample = raw_datasets["train"].select(range(sample_size))
     # test_mapping(test_sample, tokenizer, args.max_length)

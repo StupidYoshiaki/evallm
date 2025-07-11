@@ -137,6 +137,24 @@ ps aux | grep llama-server
 
 # pipelineのコマンドの流れ
 ```
-python -m src.data.split -i data/JSQuAD/train.jsonl -r 80 -o1 data/JSQuAD/pipeline/train/step1/raw.jsonl -o2 data/JSQuAD/pipeline/train/step2/raw.jsonl
+python -m src.data.split -i data/JSQuAD/train.jsonl -r 50 -o1 data/JSQuAD/pipeline/train/step1/raw.jsonl -o2 data/JSQuAD/pipeline/train/step2/raw.jsonl
+
+python -m src.data.split -i data/JSQuAD/pipeline/train/step1/raw.jsonl -r 95 -o1 data/JSQuAD/pipeline/train/step1/sft_train.jsonl -o2 data/JSQuAD/pipeline/train/step1/sft_valid.jsonl
+
 python -m src.data.split -i data/JSQuAD/pipeline/train/step1/raw.jsonl -r 80 -o1 data/JSQuAD/pipeline/train/step1/bert_train.jsonl -o2 data/JSQuAD/pipeline/train/step1/bert_valid.jsonl
+
+python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --train-dataset data/JSQuAD/pipeline/train/step1/sft_train.jsonl --valid-dataset data/JSQuAD/pipeline/train/step1/sft_valid.jsonl --model-type q_generator  
+
+python -m src.models.train_bert --model-path models/extractor/modernbert-ja-310m/safetensors/base --train-dataset-path data/JSQuAD/pipeline/train/step1/bert_train.jsonl --valid-dataset-path data/JSQuAD/pipeline/train/step1/bert_valid.jsonl --num-train-epochs 3
+```
+
+- 回答を完璧に抽出したいというよりは、ある程度大雑把に回答の見当をつけてほしい
+    - レーベンシュタインで距離を測ってマッチングさせるので
+    - だからmodern-bertを使う
+
+# QA生成モデルのコマンドの流れ
+```
+python -m src.data.split -i data/JSQuAD/train.jsonl -r 95 -o1 data/JSQuAD/train/sft_train.jsonl -o2 data/JSQuAD/train/sft_valid.jsonl
+
+python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --train-dataset data/JSQuAD/train/sft_train.jsonl --valid-dataset data/JSQuAD/train/sft_valid.jsonl --model-type qa_generator  
 ```

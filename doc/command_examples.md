@@ -136,6 +136,7 @@ ps aux | grep llama-server
 ```
 
 # pipelineのコマンドの流れ
+## モデル開発
 ```
 python -m src.data.split -i data/JSQuAD/train.jsonl -r 50 -o1 data/JSQuAD/pipeline/train/step1/raw.jsonl -o2 data/JSQuAD/pipeline/train/step2/raw.jsonl
 
@@ -143,10 +144,39 @@ python -m src.data.split -i data/JSQuAD/pipeline/train/step1/raw.jsonl -r 95 -o1
 
 python -m src.data.split -i data/JSQuAD/pipeline/train/step1/raw.jsonl -r 80 -o1 data/JSQuAD/pipeline/train/step1/bert_train.jsonl -o2 data/JSQuAD/pipeline/train/step1/bert_valid.jsonl
 
-python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --train-dataset data/JSQuAD/pipeline/train/step1/sft_train.jsonl --valid-dataset data/JSQuAD/pipeline/train/step1/sft_valid.jsonl --model-type q_generator  
+python -m src.data.split -i data/JSQuAD/pipeline/train/step2/raw.jsonl -r 80 -o1 data/JSQuAD/pipeline/train/step2/bert_train.jsonl -o2 data/JSQuAD/pipeline/train/step2/bert_valid.jsonl
+
+python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --train-dataset data/JSQuAD/pipeline/train/step1/raw.jsonl --model-type q_generator  
+(
+python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --train-dataset data/JSQuAD/pipeline/train/step1/sft_train.jsonl --valid-dataset data/JSQuAD/pipeline/train/step1/sft_valid.jsonl --model-type q_generator
+)
+
+python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/sft/20250713/checkpoint-3929 --outfile models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250713.gguf --base models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base
 
 python -m src.models.train_bert --model-path models/extractor/modernbert-ja-310m/safetensors/base --train-dataset-path data/JSQuAD/pipeline/train/step1/bert_train.jsonl --valid-dataset-path data/JSQuAD/pipeline/train/step1/bert_valid.jsonl --num-train-epochs 3
+
+python -m src.models.generate_dpo_dataset --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250713.gguf --template question_generator_user.j2 --bert-model models/extractor/modernbert-ja-310m/safetensors/finetuned/20250712/best_model --input data/JSQuAD/pipeline/train/step2/raw.jsonl --output-dir data/JSQuAD/pipeline/train/step2 --num-candidates 5 --temperature 1.0
+
+python -m src.models.train_dpo --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --resume-from-checkpoint models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/sft/20250713/checkpoint-3929 --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --train-dataset data/JSQuAD/pipeline/train/step2/dpo/202507170608/generated.jsonl --epochs 2
+
+python ../opt/llama/convert_lora_to_gguf.py models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/dpo/20250717/checkpoint-7858 --outfile models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/dpo-20250717.gguf --base models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base
+
+python -m src.models.train_bert --model-path models/extractor/modernbert-ja-310m/safetensors/finetuned/20250712/best_model --train-dataset-path data/JSQuAD/pipeline/train/step2/bert_train.jsonl --valid-dataset-path data/JSQuAD/pipeline/train/step2/bert_valid.jsonl --num-train-epochs 3
+
+python -m src.models.generate_and_extract --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/dpo-20250717.gguf --template question_generator_user.j2 --bert-model models/extractor/modernbert-ja-310m/safetensors/finetuned/20250712/best_model --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
+
+## モデル評価
+```
+python -m src.models.generate_and_extract --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250713.gguf --template question_generator_user.j2 --bert-model models/extractor/modernbert-ja-310m/safetensors/finetuned/20250712/best_model --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/pipeline/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+
+./script/predict.sh -i data/JSQuAD/pipeline/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202507170808/generated.jsonl -t evaluatee.j2
+
+python -m src.data.evaluate --ground-truth-file data/JSQuAD/pipeline/eval/Llama-3.1-Swallow-8B-Instruct-v0.3/202507170808/generated.jsonl --prediction-base-dir output/JSQuAD/generated/Llama-3.1-Swallow-8B-Instruct-v0.3/202507170808
+
+python -m src.data.corr --file1 output/JSQuAD/baseline/ranking.md --file2 output/JSQuAD/generated/Llama-3.1-Swallow-8B-Instruct-v0.3/202507170808/ranking_20250718.md
+```
+
 
 - 回答を完璧に抽出したいというよりは、ある程度大雑把に回答の見当をつけてほしい
     - レーベンシュタインで距離を測ってマッチングさせるので

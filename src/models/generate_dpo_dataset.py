@@ -24,7 +24,6 @@ from ..myutils.logging import setup_logging
 # --- グローバル設定 ---
 MAX_RETRIES = 100 # 1つの候補生成タスクあたりの最大リトライ回数
 RETRY_DELAY = 2  # 再試行までの待機時間（秒）
-NUM_CANDIDATES = 10 # 1アイテムあたりに収集したい有効な候補の数
 
 # --- ここからがメインのロジックです ---
 
@@ -62,7 +61,7 @@ def extract_single_answer(question: str, context: str, model, tokenizer, device)
             padding="max_length", return_tensors="pt", return_offsets_mapping=True
         )
         offset_mapping = inputs.pop("offset_mapping").squeeze(0)
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        inputs = inputs.to(device)
 
         outputs = model(**inputs)
         start_logits = outputs.start_logits.squeeze(0)
@@ -126,14 +125,15 @@ async def generate_and_evaluate_candidate(
     bert_model,
     bert_tokenizer,
     device,
-    temperature: float
+    temperature: float,
+    max_retries: int
 ) -> dict | None:
     """
     単一の候補（質問と回答）を生成・評価するコルーチン。
     """
     retries = 0
     context = item.get("context")
-    while retries < MAX_RETRIES:
+    while retries < max_retries:
         try:
             # 1. LLMで質問を生成
             messages = build_messages(template, context=context)
@@ -160,7 +160,7 @@ async def generate_and_evaluate_candidate(
         except Exception as e:
             retries += 1
             logging.warning(f"候補生成中にエラー ({retries}/{MAX_RETRIES}): {e}")
-            if retries < MAX_RETRIES:
+            if retries < max_retries:
                 await asyncio.sleep(RETRY_DELAY)
             else:
                 logging.error(f"候補生成が最大試行回数に達しました。")
@@ -176,7 +176,8 @@ async def create_dpo_sample_for_item(
     bert_model,
     bert_tokenizer,
     device,
-    temperature: float
+    temperature: float,
+    num_candidates: int
 ) -> dict | None:
     """
     単一のJSQuADアイテムから、1つのDPO学習サンプル（prompt, chosen, rejected）を作成する。
@@ -194,19 +195,19 @@ async def create_dpo_sample_for_item(
     valid_candidates = []
     total_attempts = 0
     # 無限ループを避けるための全体的な試行回数の上限
-    max_total_attempts = NUM_CANDIDATES * MAX_RETRIES * 2 
+    max_total_attempts = num_candidates * MAX_RETRIES
 
-    logging.info(f"ID {item.get('id')} のために{NUM_CANDIDATES}個の有効な候補を収集します...")
+    logging.info(f"ID {item.get('id')} のために{num_candidates}個の有効な候補を収集します...")
     
-    while len(valid_candidates) < NUM_CANDIDATES and total_attempts < max_total_attempts:
+    while len(valid_candidates) < num_candidates and total_attempts < max_total_attempts:
         # 不足している候補の数を計算
-        needed = NUM_CANDIDATES - len(valid_candidates)
+        needed = num_candidates - len(valid_candidates)
         
         # 不足分だけタスクを作成して並列実行
         tasks_to_run = [
             generate_and_evaluate_candidate(
                 item, client, template, model_label, max_tokens,
-                bert_model, bert_tokenizer, device, temperature
+                bert_model, bert_tokenizer, device, temperature, num_candidates
             ) for _ in range(needed)
         ]
         
@@ -218,16 +219,16 @@ async def create_dpo_sample_for_item(
                 valid_candidates.append(cand)
         
         total_attempts += needed
-        logging.info(f"ID {item.get('id')}: {len(valid_candidates)}/{NUM_CANDIDATES} 個の候補を収集済み。総試行回数: {total_attempts}")
+        logging.info(f"ID {item.get('id')}: {len(valid_candidates)}/{num_candidates} 個の候補を収集済み。総試行回数: {total_attempts}")
 
     # 上限に達しても候補が一つも得られなかった場合
     if not valid_candidates:
         logging.error(f"ID {item.get('id')} は最大試行回数({max_total_attempts})に達しましたが、候補を1つも生成できませんでした。")
         return None
     
-    # 候補が10個に満たなかった場合（警告を出すが処理は続行）
-    if len(valid_candidates) < NUM_CANDIDATES:
-        logging.warning(f"ID {item.get('id')} は{NUM_CANDIDATES}個の候補を収集できませんでした（収集数: {len(valid_candidates)}）。収集済みの候補で処理を続行します。")
+    # 候補がnum_candidates個に満たなかった場合（警告を出すが処理は続行）
+    if len(valid_candidates) < num_candidates:
+        logging.warning(f"ID {item.get('id')} は{num_candidates}個の候補を収集できませんでした（収集数: {len(valid_candidates)}）。収集済みの候補で処理を続行します。")
 
     # 2. 最適な負例を選定
     best_candidate = None
@@ -246,7 +247,9 @@ async def create_dpo_sample_for_item(
         "id": item.get("id"),
         "prompt": context,
         "chosen": original_question,
-        "rejected": best_candidate["question"]
+        "chosen_answer": original_answer,
+        "rejected": best_candidate["question"],
+        "rejected_answer": best_candidate["answer"],
     }
 
 
@@ -258,7 +261,7 @@ async def main():
     p.add_argument("--template", type=str, required=True, help="プロンプト Jinja2 テンプレート名 (.j2)")
     p.add_argument("--n-gpu-layers", type=int, default=42, help="GPU レイヤ数")
     p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
-    p.add_argument("--temperature", type=float, default=0.7, help="生成時の温度")
+    p.add_argument("--temperature", type=float, default=1.2, help="生成時の温度")
     p.add_argument("--bert-model", type=Path, required=True, help="回答抽出用のBERTモデルのパス")
     p.add_argument("--bert-gpu-id", type=int, default=0, help="BERTモデルが使用するGPU ID")
     p.add_argument("--input", type=Path, required=True, help="入力 JSONL ファイルパス (JSQuAD形式)")
@@ -266,6 +269,7 @@ async def main():
     p.add_argument("--parallel", type=int, default=8, help="並列処理数")
     p.add_argument("--log-filename", type=Path, default=None, help="ログファイル名")
     p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
+    p.add_argument("--num-candidates", type=int, default=8, help="1アイテムあたりの有効な候補数")
     args = p.parse_args()
 
     setup_logging(filename=args.log_filename, log_type=args.log_type)
@@ -284,6 +288,7 @@ async def main():
     model_label = args.base_model.parts[-1] if args.base_model.is_dir() else args.base_model.stem
     
     dataset = read_jsonl(args.input)
+    # dataset = dataset[:5] # デバッグ用に最初の5件のみを使用
 
     # 3. メイン処理
     dpo_results = []
@@ -294,7 +299,7 @@ async def main():
             tasks = [
                 create_dpo_sample_for_item(
                     item, client, args.template, model_label, 200, # max_tokensは固定値
-                    bert_model, bert_tokenizer, device, args.temperature
+                    bert_model, bert_tokenizer, device, args.temperature, args.num_candidates
                 ) 
                 for item in batch_items
             ]
@@ -303,12 +308,11 @@ async def main():
             dpo_results.extend([res for res in batch_results if res is not None])
 
     # 4. 出力
-    mname = model_label
     today = datetime.datetime.now().strftime("%Y%m%d%H%M")
-    out_dir = args.output_dir / mname / today
+    out_dir = args.output_dir / "dpo" / today
     
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "dpo_dataset.jsonl"
+    out_path = out_dir / "generated.jsonl"
     write_jsonl(out_path, dpo_results)
 
     # 5. LLMサーバー停止

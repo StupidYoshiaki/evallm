@@ -4,7 +4,7 @@ import argparse
 import datetime
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 import torch
 from peft import LoraConfig, TaskType
@@ -13,15 +13,15 @@ from transformers import (
     BitsAndBytesConfig, 
     AutoModelForCausalLM, 
     AutoConfig,
-    TrainingArguments,
 )
-from trl import DPOTrainer # SFTTrainerの代わりにDPOTrainerをインポート
+from trl import DPOTrainer, DPOConfig # DPOConfigをインポート
 from transformers.trainer_utils import set_seed
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 
 # 外部のユーティリティ関数をインポート（実際のパスに合わせてください）
-from ..myutils.io import write_json, write_config
+from ..myutils.io import write_config
 from ..myutils.logging import setup_logging
+from ..myutils.parsing import render_prompt
 
 # 使用するGPUを指定
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
@@ -45,21 +45,54 @@ def set_device_map(base_model_path: Path) -> dict:
     logging.info(f"手動device_mapを構築しました: {device_map}")
     return device_map
 
+def format_dataset_for_dpo(
+    example: Dict, 
+    tokenizer: AutoTokenizer, 
+    user_template: str, 
+    assistant_template: str
+) -> Dict:
+    """
+    DPO学習用に、データセットの各サンプルをチャットテンプレート形式に整形する。
+    """
+    # ユーザープロンプトのコンテンツを作成
+    user_content = render_prompt(user_template, context=example['prompt'])
+    
+    # Hugging Faceのチャット形式に変換
+    prompt_messages = [{"role": "user", "content": user_content}]
+    
+    # トークナイザのチャットテンプレートを適用し、最終的なプロンプト文字列を作成
+    prompt_str = tokenizer.apply_chat_template(
+        prompt_messages, 
+        tokenize=False, 
+        add_generation_prompt=True
+    )
+    
+    # chosenとrejectedにもテンプレートを適用
+    chosen_response = render_prompt(assistant_template, question=example['chosen'])
+    rejected_response = render_prompt(assistant_template, question=example['rejected'])
+    
+    return {
+        "prompt": prompt_str,
+        "chosen": chosen_response,
+        "rejected": rejected_response,
+    }
+
 def train_dpo(
     base_model: Path,
     resume_from_checkpoint: Optional[Path],
     dataset_path: Path,
     valid_dataset_path: Optional[Path],
+    user_template: str,
+    assistant_template: str,
     output_dir: Path,
     epochs: int,
     batch_size: int,
     accum_steps: int,
-    beta: float, # DPO用のbetaパラメータを追加
+    beta: float,
     seed: int,
 ):
     """メインのDPO学習処理を実行する関数。"""
     
-    # 再現性のために乱数シードを固定
     set_seed(seed)
 
     # 1. トークナイザの準備
@@ -71,19 +104,47 @@ def train_dpo(
     if tokenizer.pad_token is None:
         logging.info("pad_tokenがNoneのため、eos_tokenをpad_tokenとして設定します。")
         tokenizer.pad_token = tokenizer.eos_token
-        # DPOではpaddingを左側にするのが一般的
         tokenizer.padding_side = 'left'
 
-    # 2. データセットの読み込み
+    # 2. データセットの読み込みと前処理
     logging.info(f"DPOデータセットを読み込み中: {dataset_path}")
-    train_dataset = load_dataset("json", data_files=str(dataset_path), split="train")
+    train_dataset_raw = load_dataset("json", data_files=str(dataset_path), split="train")
+    
+    train_dataset = train_dataset_raw.map(
+        format_dataset_for_dpo, 
+        fn_kwargs={
+            "tokenizer": tokenizer, 
+            "user_template": user_template,
+            "assistant_template": assistant_template
+        }
+    )
     
     eval_dataset = None
     if valid_dataset_path:
         logging.info(f"DPO検証データセットを読み込み中: {valid_dataset_path}")
-        eval_dataset = load_dataset("json", data_files=str(valid_dataset_path), split="train")
+        eval_dataset_raw = load_dataset("json", data_files=str(valid_dataset_path), split="train")
+        eval_dataset = eval_dataset_raw.map(
+            format_dataset_for_dpo,
+            fn_kwargs={
+                "tokenizer": tokenizer, 
+                "user_template": user_template,
+                "assistant_template": assistant_template
+            }
+        )
+    
+    # データセットのサンプルを常に表示して確認する
+    logging.info("--- 整形後の学習データセットのサンプル（最初の5件） ---")
+    num_samples_to_show = min(5, len(train_dataset))
+    for i in range(num_samples_to_show):
+        example = train_dataset[i]
+        print("-" * 50)
+        print(f"【サンプル {i+1}】")
+        print(f"--- PROMPT ---\n{example['prompt']}")
+        print(f"--- CHOSEN ---\n{example['chosen']}")
+        print(f"--- REJECTED ---\n{example['rejected']}")
+        print("-" * 50 + "\n")
 
-    # 3. モデルの準備 (量子化とロード)
+    # 3. モデルの準備
     logging.info(f"ベースモデル（SFT済みモデル）をロード中: {base_model}")
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -109,11 +170,17 @@ def train_dpo(
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     )
 
-    # 5. 学習パラメータ（TrainingArguments）の設定
+    # 5. DPOConfigの設定
     eval_strategy = "steps" if eval_dataset is not None else "no"
     logging_and_save_steps = 1000
 
-    training_args = TrainingArguments(
+    dpo_config = DPOConfig(
+        # --- DPO固有のパラメータ ---
+        beta=beta,
+        max_prompt_length=1024,
+        max_length=2048,
+        
+        # --- TrainingArguments相当のパラメータ ---
         output_dir=str(output_dir),
         bf16=True,
         num_train_epochs=epochs,
@@ -121,13 +188,13 @@ def train_dpo(
         gradient_accumulation_steps=accum_steps,
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
-        learning_rate=1e-5, # DPOではSFTより学習率を低めに設定するのが一般的
+        learning_rate=1e-5,
         lr_scheduler_type="cosine",
         max_grad_norm=0.3,
         warmup_ratio=0.1,
         logging_steps=logging_and_save_steps,
         save_steps=logging_and_save_steps,
-        evaluation_strategy=eval_strategy,
+        eval_strategy=eval_strategy,
         eval_steps=logging_and_save_steps,
         save_total_limit=1,
         load_best_model_at_end=eval_dataset is not None,
@@ -135,18 +202,14 @@ def train_dpo(
     )
 
     # 6. DPOTrainerの初期化
-    # DPOTrainerは内部で自動的に参照モデルのコピーを作成する
     dpo_trainer = DPOTrainer(
         model,
-        ref_model=None, # Noneにすると、trainerが自動で参照モデルを準備してくれる
-        args=training_args,
+        ref_model=None,
+        args=dpo_config, # DPOConfigオブジェクトを渡す
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         peft_config=peft_config,
-        beta=beta, # DPO損失のβパラメータ
-        max_prompt_length=1024, # プロンプトの最大長
-        max_length=2048, # プロンプト+応答の最大長
     )
 
     # 7. 学習の実行
@@ -161,18 +224,22 @@ def train_dpo(
     logging.info("学習が完了しました。")
     
     # 8. 最終モデルの保存
-    final_model_path = output_dir / "best_dpo_model"
-    dpo_trainer.save_model(str(final_model_path))
-    tokenizer.save_pretrained(str(final_model_path))
-    logging.info(f"最良モデルを '{final_model_path}' に保存しました。")
+    if eval_dataset is not None:
+        logging.info("最良モデルを保存します...")
+        final_model_path = output_dir / "best_model"
+        dpo_trainer.save_model(str(final_model_path))
+        tokenizer.save_pretrained(str(final_model_path))
+        logging.info(f"最良モデルを '{final_model_path}' に保存しました。")
 
 
 def main():
     p = argparse.ArgumentParser(description="DPO 学習スクリプト")
     p.add_argument("--base-model", type=Path, required=True, help="ファインチューニングのベースとなるSFT済みモデルのパス")
     p.add_argument("--resume-from-checkpoint", type=Path, default=None, help="学習を再開するチェックポイントのパス")
-    p.add_argument("--dataset", type=Path, required=True, help="DPO学習用のJSONLデータセットパス")
+    p.add_argument("--train-dataset", type=Path, required=True, help="DPO学習用のJSONLデータセットパス")
     p.add_argument("--valid-dataset", type=Path, default=None, help="DPO検証用のJSONLデータセットパス (オプション)")
+    p.add_argument("--user-template", type=str, required=True, help="ユーザープロンプトのJinja2テンプレートファイル名")
+    p.add_argument("--assistant-template", type=str, required=True, help="アシスタント応答のJinja2テンプレートファイル名")
     p.add_argument("--epochs", type=int, default=1, help="学習エポック数")
     p.add_argument("--batch-size", type=int, default=1, help="デバイス毎のバッチサイズ")
     p.add_argument("--accum-steps", type=int, default=8, help="勾配累積ステップ数")
@@ -182,37 +249,36 @@ def main():
     p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
     args = p.parse_args()
 
-    # ログ設定
     setup_logging(filename=args.log_filename, log_type=args.log_type)
 
-    # 出力ディレクトリの作成
     base_model_path = Path(args.base_model)
-    # SFT済みモデルのディレクトリ構造を想定
-    output_dir = base_model_path.parent / f"dpo_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    output_dir = base_model_path.parent / "dpo" / datetime.datetime.now().strftime("%Y%m%d")
     output_dir.mkdir(parents=True, exist_ok=False)
     logging.info(f"出力ディレクトリを作成しました: {output_dir}")
 
-    # メインの学習関数を呼び出し
     train_dpo(
         base_model_path,
         args.resume_from_checkpoint,
-        args.dataset,
+        args.train_dataset,
         args.valid_dataset,
+        args.user_template,
+        args.assistant_template,
         output_dir,
         args.epochs,
         args.batch_size,
         args.accum_steps,
         args.beta,
-        args.seed
+        args.seed,
     )
 
-    # 実行した学習設定をJSONファイルとして保存
     config = vars(args).copy()
     for key, value in config.items():
         if isinstance(value, Path):
             config[key] = str(value)
-    write_config(output_dir, config)
-    logging.info(f"学習設定を保存しました: {output_dir / 'training_config.json'}")
+    config_path = output_dir / "config.json"
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    logging.info(f"学習設定を保存しました: {config_path}")
 
 if __name__ == "__main__":
     main()

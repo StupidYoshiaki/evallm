@@ -220,7 +220,13 @@ def run_training(args: argparse.Namespace):
     set_seed(args.seed)
 
     # 出力ディレクトリの作成
-    output_dir = Path(args.model_path).parent / "finetuned" / datetime.datetime.now().strftime("%Y%m%d") 
+    model_path = Path(args.model_path)
+    if model_path.parts[-1] == "base":
+        output_dir = model_path.parent / "finetuned" / datetime.datetime.now().strftime("%Y%m%d") 
+    elif model_path.parts[-1] == "best_model":
+        output_dir = model_path.parent.parent.parent / "finetuned" / datetime.datetime.now().strftime("%Y%m%d")
+    else:
+        raise ValueError(f"モデルパスの形式が不正です: {args.model_path}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. データの読み込み
@@ -288,13 +294,13 @@ def run_training(args: argparse.Namespace):
     tokenizer.save_pretrained(str(final_model_path))
     logging.info(f"最良モデルを '{final_model_path}' に保存しました。")
 
-    # # 7. 学習設定の保存
-    # config_path = output_dir / "training_config.json"
-    # # argparse.Namespaceを辞書に変換
-    # args_dict = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
-    # with open(config_path, "w", encoding="utf-8") as f:
-    #     json.dump(args_dict, f, indent=4, ensure_ascii=False)
-    # logging.info(f"学習設定を '{config_path}' に保存しました。")
+    # 7. 学習設定の保存
+    config_path = output_dir / "config.json"
+    # argparse.Namespaceを辞書に変換
+    args_dict = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(args_dict, f, indent=4, ensure_ascii=False)
+    logging.info(f"学習設定を '{config_path}' に保存しました。")
 
 
 def main():

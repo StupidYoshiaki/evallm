@@ -104,8 +104,8 @@ async def main():
         case "baseline.jsonl":
             out_path = args.output_dir / dname / "baseline" / mname / "prediction.jsonl"
         case "generated.jsonl":
-            gmname = args.input.parts[3]
-            date_str = args.input.parts[4]
+            gmname = args.input.parts[-3]
+            date_str = args.input.parts[-2]
             out_path = args.output_dir / dname / "generated" / gmname / date_str / mname / "prediction.jsonl"
         case _:
             logging.error("不明な入力ファイル形式です")

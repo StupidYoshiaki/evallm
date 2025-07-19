@@ -212,7 +212,7 @@ def train_sft(
     trainer = SFTTrainer(
         model=model,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset, # 検証データセットを渡す
+        eval_dataset=eval_dataset if eval_dataset is not None else None,
         data_collator=collator,
         args=training_args,
         peft_config=peft_config,
@@ -261,6 +261,14 @@ def train_sft(
         trainer.train()
     
     logging.info("学習が完了しました。")
+
+    # 9. モデルとトークナイザの保存
+    if eval_dataset is not None:
+        logging.info("最良モデルを保存します...")
+        best_model_path = output_dir / "best_model"
+        trainer.save_model(str(best_model_path))
+        tokenizer.save_pretrained(str(best_model_path))
+        logging.info(f"最良モデルを '{best_model_path}' に保存しました。")
 
 def main():
     # コマンドライン引数のパーサーをセットアップ

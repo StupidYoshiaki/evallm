@@ -19,6 +19,15 @@ from transformers.trainer_utils import set_seed
 
 from ..myutils.logging import setup_logging
 
+# PyTorch 2.0以降のJITコンパイラ(Dynamo)を無効化し、DataParallelとの互換性問題を回避する
+try:
+    torch.compiler.disable()
+    logging.info("torch.compiler.disable() を呼び出し、Dynamoを無効化しました。")
+except AttributeError:
+    # 古いPyTorchバージョンにはtorch.compilerが存在しないため、何もしない
+    logging.info("torch.compiler 属性が見つかりません。おそらく古いPyTorchバージョンです。")
+    pass
+
 # GPU 0とGPU 1を利用可能にする
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 

@@ -288,7 +288,7 @@ async def main():
     model_label = args.base_model.parts[-1] if args.base_model.is_dir() else args.base_model.stem
     
     dataset = read_jsonl(args.input)
-    # dataset = dataset[:5] # デバッグ用に最初の5件のみを使用
+    dataset = dataset[:20] # デバッグ用に最初の5件のみを使用
 
     # 3. メイン処理
     dpo_results = []

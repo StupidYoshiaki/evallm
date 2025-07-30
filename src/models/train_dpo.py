@@ -243,7 +243,7 @@ def main():
     p.add_argument("--epochs", type=int, default=1, help="学習エポック数")
     p.add_argument("--batch-size", type=int, default=1, help="デバイス毎のバッチサイズ")
     p.add_argument("--accum-steps", type=int, default=8, help="勾配累積ステップ数")
-    p.add_argument("--beta", type=float, default=0.1, help="DPO損失のβパラメータ")
+    p.add_argument("--beta", type=float, default=0.5, help="DPO損失のβパラメータ")
     p.add_argument("--seed", type=int, default=42, help="乱数シード")
     p.add_argument("--log-filename", type=Path, default=None, help="ログファイル名")
     p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
@@ -255,6 +255,15 @@ def main():
     output_dir = base_model_path.parent / "dpo" / datetime.datetime.now().strftime("%Y%m%d")
     output_dir.mkdir(parents=True, exist_ok=False)
     logging.info(f"出力ディレクトリを作成しました: {output_dir}")
+
+    config = vars(args).copy()
+    for key, value in config.items():
+        if isinstance(value, Path):
+            config[key] = str(value)
+    config_path = output_dir / "config.json"
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    logging.info(f"学習設定を保存しました: {config_path}")
 
     train_dpo(
         base_model_path,
@@ -270,15 +279,6 @@ def main():
         args.beta,
         args.seed,
     )
-
-    config = vars(args).copy()
-    for key, value in config.items():
-        if isinstance(value, Path):
-            config[key] = str(value)
-    config_path = output_dir / "config.json"
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
-    logging.info(f"学習設定を保存しました: {config_path}")
 
 if __name__ == "__main__":
     main()

@@ -1,152 +1,119 @@
-#!/usr/bin/env python3
 import os
 import signal
 import subprocess
 import time
 import httpx
 import logging
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-# llama-server の起動設定
-LLAMA_SERVER_CMD = os.getenv("LLAMA_SERVER_CMD", "llama-server")
-LLM_HOST = os.getenv("LLM_HOST", "127.0.0.1")
-LLM_PORT = int(os.getenv("LLM_PORT", "8080"))
-LLM_BASE_URL = f"http://{LLM_HOST}:{LLM_PORT}/v1"
-COMPLETIONS_PATH = "/chat/completions"
-HEADERS = {"Content-Type": "application/json"}
-
-# グローバル変数でプロセス制御
-_llm_process: subprocess.Popen = None
+# グローバル変数で複数のプロセスをポート番号をキーとして制御
+_server_processes: Dict[int, subprocess.Popen] = {}
 
 def start_llama_server(
-    base_model: str,
-    lora_model: str = None,
-    n_gpu_layers: int = None,
+    model_path: str,
+    port: int,
+    n_gpu_layers: int,
     parallel: int = 8,
     n_ctx: int = 2048,
-    timeout: int = 600 # サーバー起動のタイムアウト（秒）
+    lora_path: Optional[str] = None,
+    timeout: int = 120
 ) -> None:
     """
-    llama-serverを起動し、ヘルスチェックエンドポイントで準備が完了するまで待機する（修正版）。
+    指定されたポートでllama-serverを起動し、ヘルスチェックで準備完了を待つ。
     """
-    global _llm_process
-    if _llm_process is not None and _llm_process.poll() is None:
-        logging.info(f"既に llama-server が起動中 (PID={_llm_process.pid})")
+    global _server_processes
+    if port in _server_processes and _server_processes[port].poll() is None:
+        logging.info(f"ポート {port} のサーバーは既に起動中です (PID={_server_processes[port].pid})")
         return
 
     cmd = [
-        LLAMA_SERVER_CMD, "--host", LLM_HOST, "--port", str(LLM_PORT),
-        "--model", base_model, "--parallel", str(parallel), "-c", str(n_ctx),
-        # "--reasoning-format", "deepseek"
-        # "--rope-scaling", "yarn", "--rope-scale", "4", "--yarn-orig-ctx", "32768",
+        "llama-server",
+        "--host", "127.0.0.1",
+        "--port", str(port),
+        "--model", model_path,
+        "--parallel", str(parallel),
+        "-c", str(n_ctx),
     ]
-    if lora_model:
-        cmd += ["--lora", lora_model]
+    if lora_path:
+        cmd += ["--lora", lora_path]
     if n_gpu_layers is not None:
         cmd += ["--n-gpu-layers", str(n_gpu_layers)]
 
-    logging.info(f"llama-server を起動します: {' '.join(cmd)}")
-    _llm_process = subprocess.Popen(
+    logging.info(f"ポート {port} でllama-serverを起動します: {' '.join(cmd)}")
+    log_file = Path(f"./llama_server_{port}.log")
+    
+    process = subprocess.Popen(
         cmd, 
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdout=open(log_file, "w"), stderr=subprocess.STDOUT,
         text=True, preexec_fn=os.setsid,
-        # stdout=None, stderr=None,
     )
+    _server_processes[port] = process
 
-    health_check_url = f"http://{LLM_HOST}:{LLM_PORT}/health"
-    logging.info(f"サーバーが準備完了になるのを待ちます... (エンドポイント: {health_check_url}, タイムアウト: {timeout}秒)")
+    health_check_url = f"http://127.0.0.1:{port}/health"
+    logging.info(f"ポート {port} のサーバーが準備完了になるのを待ちます... (タイムアウト: {timeout}秒)")
     
     start_time = time.monotonic()
-    
-    # タイムアウトまでポーリング
-    for i in range(timeout):
-        if _llm_process.poll() is not None:
-            logging.error("llama-serverが起動中に予期せず終了しました。")
-            stdout, _ = _llm_process.communicate()
-            logging.error(f"サーバーログ:\n{stdout}")
-            raise RuntimeError("llama-serverの起動に失敗しました。")
-
+    while time.monotonic() - start_time < timeout:
+        if process.poll() is not None:
+            raise RuntimeError(f"ポート {port} のサーバーが起動中に予期せず終了しました。ログ({log_file})を確認してください。")
         try:
             with httpx.Client() as client:
                 response = client.get(health_check_url, timeout=1.0)
-            
             if response.status_code == 200 and response.json().get("status") == "ok":
-                elapsed_time = time.monotonic() - start_time
-                logging.info(f"llama-server 起動完了 (PID={_llm_process.pid}, 所要時間: {elapsed_time:.2f}秒)")
+                logging.info(f"ポート {port} のサーバー起動完了 (PID={process.pid}, 所要時間: {time.monotonic() - start_time:.2f}秒)")
                 return
-
         except httpx.ConnectError:
-            # 接続できない場合は、まだ起動中なので何もしない（ループの最後でsleepする）
-            pass
-        except Exception as e:
-            # その他の予期せぬエラー
-            logging.warning(f"ヘルスチェック中に予期せぬエラー: {e}")
-        
-        # ★★★ 成功してreturnしなかった場合は、必ず1秒待つ ★★★
-        if i < timeout - 1: # 最後のループでは待たない
             time.sleep(1)
-        else:
-            # タイムアウトに達した場合
-            logging.error(f"タイムアウト({timeout}秒)以内に llama-server が起動しませんでした。")
-            stop_llama_server()
-            raise TimeoutError("llama-serverの起動に失敗しました。")
+        except Exception as e:
+            logging.warning(f"ヘルスチェック中に予期せぬエラー: {e}")
+            time.sleep(1)
+    
+    raise TimeoutError(f"タイムアウト({timeout}秒)以内にポート {port} のサーバーが起動しませんでした。")
 
-def stop_llama_server() -> None:
+def stop_all_llama_servers() -> None:
     """
-    起動された llama-server プロセスグループをまとめて停止する。
+    起動されている全てのllama-serverプロセスグループを停止する。
     """
-    global _llm_process
-    if _llm_process is None:
+    global _server_processes
+    if not _server_processes:
         return
 
-    pgid = os.getpgid(_llm_process.pid)
-    logging.info(f"llama-server (PGID={pgid}) を停止します")
-    # プロセスグループ全体に SIGTERM
-    os.killpg(pgid, signal.SIGTERM)
-    try:
-        _llm_process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        logging.warning("SIGTERM で終了しなかったため SIGKILL を送信します")
-        os.killpg(pgid, signal.SIGKILL)
-        _llm_process.wait()
-    logging.info("llama-server の停止が完了しました")
-    _llm_process = None
+    logging.info(f"{len(_server_processes)}個のサーバーを停止します...")
+    for port, process in _server_processes.items():
+        if process.poll() is None:
+            try:
+                pgid = os.getpgid(process.pid)
+                logging.info(f"ポート {port} のサーバー (PGID={pgid}) を停止します")
+                os.killpg(pgid, signal.SIGTERM)
+                process.wait(timeout=5)
+            except (subprocess.TimeoutExpired, ProcessLookupError):
+                logging.warning(f"ポート {port} のサーバーが正常終了しなかったためSIGKILLを送信します")
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except Exception as e:
+                logging.error(f"ポート {port} のサーバー停止中にエラー: {e}")
+    
+    logging.info("全てのサーバーの停止が完了しました")
+    _server_processes.clear()
 
 async def generate_from_llm(
-    client: httpx.Client,
+    client: httpx.AsyncClient,
+    port: int,
     messages: List[Dict[str, str]],
     model: str,
     max_tokens: int = 200,
     temperature: float = 0.7,
 ) -> Dict[str, Any]:
     """
-    llama-server (OpenAI互換) に chat completion リクエストを送信し、
-    レスポンス dict を返す。
+    指定されたポートのllama-serverにchat completionリクエストを送信する。
     """
-    url = f"{LLM_BASE_URL}{COMPLETIONS_PATH}"
+    url = f"http://127.0.0.1:{port}/v1/chat/completions"
     payload = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
-    logging.debug(f"POST {url} ペイロード: {payload}")
-    resp = await client.post(url, headers=HEADERS, json=payload)
+    resp = await client.post(url, json=payload, timeout=300.0)
     resp.raise_for_status()
-    data = resp.json()
-    logging.debug(f"データ: {data}")
-    return data
-
-# SIGINT (Ctrl-C) をキャッチして、llama-server を停止する
-def _handle_sigint(signum, frame):
-    logging.info("CTRL-C を検知しました。llama-server を停止して終了します。")
-    stop_llama_server()
-    exit(0)
-signal.signal(signal.SIGINT, _handle_sigint)
-
-# エラー時に handle_error を呼び出して、llama-server を停止する
-def handle_error():
-    logging.error("エラーが発生しました。llama-server を停止します。")
-    stop_llama_server()
-    exit(1)
-signal.signal(signal.SIGTERM, lambda signum, frame: handle_error())
+    return resp.json()

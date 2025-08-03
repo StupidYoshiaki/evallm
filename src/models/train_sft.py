@@ -103,6 +103,46 @@ def _create_and_tokenize_dataset(
     logging.info(f"トークン化済みデータセット作成完了。サンプル数: {len(dataset)}")
     return dataset
 
+def test_collator_processing(
+    dataset: Dataset, 
+    tokenizer: AutoTokenizer, 
+    collator: DataCollatorForCompletionOnlyLM
+):
+    """
+    DataCollatorForCompletionOnlyLMの処理結果を最初の5件について表示するテスト関数。
+    """
+    logging.info("--- データコレータの処理をテストします (最初の5件) ---")
+    num_samples_to_show = min(5, len(dataset))
+    
+    # テスト対象のサンプルを取得
+    samples = [dataset[i] for i in range(num_samples_to_show)]
+    
+    # コレータにサンプルを渡して、バッチを作成
+    # この時点で、labelsが-100でマスクされる
+    processed_batch = collator(samples)
+    
+    input_ids_batch = processed_batch['input_ids']
+    labels_batch = processed_batch['labels']
+    
+    for i in range(num_samples_to_show):
+        input_ids = input_ids_batch[i]
+        labels = labels_batch[i]
+        
+        print("-" * 80)
+        print(f"【サンプル {i+1}】")
+        
+        # 損失計算の対象外となる部分（プロンプト部分）をデコードして表示
+        non_loss_token_ids = [token_id for token_id, label_id in zip(input_ids, labels) if label_id == -100]
+        non_loss_part = tokenizer.decode(non_loss_token_ids, skip_special_tokens=True)
+        print(f"\n--- 損失計算対象外 (マスクされる部分) ---\n{non_loss_part}")
+
+        # 損失計算の対象となる部分（アシスタントの応答部分）をデコードして表示
+        loss_token_ids = [token_id for token_id in labels if token_id != -100]
+        loss_part = tokenizer.decode(loss_token_ids, skip_special_tokens=True)
+        print(f"\n--- 損失計算対象 (マスクされない部分) ---\n{loss_part}")
+        
+        print("-" * 80 + "\n")
+
 def train_sft(
     base_model: Path,
     resume_from_checkpoint: Optional[Path],
@@ -116,6 +156,7 @@ def train_sft(
     batch_size: int,
     accum_steps: int,
     seed: int,
+    test_collator: bool = False, # データコレータのテスト表示フラグ
 ):
     """メインの学習処理を実行する関数。"""
     
@@ -145,12 +186,26 @@ def train_sft(
     
     # 3. データコレータの設定
     # 応答部分のみを損失計算の対象とするためのコレータ
-    assistant_response_prefix_str = "<|start_header_id|>assistant<|end_header_id|>\n\n"
-    response_template_ids = tokenizer.encode(assistant_response_prefix_str, add_special_tokens=False)
+    if "Swallow" in str(base_model):
+        assistant_response_prefix_str = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        response_template_ids = tokenizer.encode(assistant_response_prefix_str, add_special_tokens=False)
+    elif "llm-jp" in str(base_model):
+        assistant_response_prefix_str = "\n\n### 応答:\n"
+        response_template_ids = tokenizer.encode(assistant_response_prefix_str, add_special_tokens=False)[1:]
+    else:
+        raise ValueError(f"ベースモデル '{base_model}' に対応する応答テンプレートが定義されていません。")
+    logging.info(f"アシスタント応答のプレフィックス: {assistant_response_prefix_str}")
+
     collator = DataCollatorForCompletionOnlyLM(
         response_template=response_template_ids,
+        # response_template=assistant_response_prefix_str,
         tokenizer=tokenizer,
     )
+
+    # コレータの動作をテスト
+    if test_collator:
+        test_collator_processing(train_dataset, tokenizer, collator)
+        logging.info("データコレータのテストを実行しました。")
 
     # 4. モデルの準備 (量子化とロード)
     logging.info(f"ベースモデルをロード中: {base_model}")
@@ -186,6 +241,10 @@ def train_sft(
     # 検証データセットの有無に応じて、評価戦略を動的に決定
     eval_strategy = "steps" if eval_dataset is not None else "no"
     logging_and_save_steps = 1000 # ログ出力とチェックポイント保存のステップ数を統一
+
+    # 出力ディレクトリの作成
+    output_dir.mkdir(parents=True, exist_ok=False)
+    logging.info(f"出力ディレクトリを作成しました: {output_dir}")
 
     training_args = TrainingArguments(
         output_dir=str(output_dir),
@@ -284,6 +343,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=1, help="デバイス毎のバッチサイズ")
     p.add_argument("--accum-steps", type=int, default=8, help="勾配累積ステップ数")
     p.add_argument("--seed", type=int, default=42, help="乱数シード")
+    p.add_argument("--test-collator", action="store_true", help="データコレータの処理を5件テスト表示して終了します。")
     p.add_argument("--log-filename", type=Path, default=None, help="ログファイル名")
     p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
     args = p.parse_args()
@@ -291,11 +351,9 @@ def main():
     # ログ設定
     setup_logging(filename=args.log_filename, log_type=args.log_type)
 
-    # 出力ディレクトリの作成（日付ベース）
+    # 出力ディレクトリのパスの定義（日付ベース）
     base_model_path = Path(args.base_model)
     output_dir = base_model_path.parent / "sft" / datetime.datetime.now().strftime("%Y%m%d") 
-    output_dir.mkdir(parents=True, exist_ok=False)
-    logging.info(f"出力ディレクトリを作成しました: {output_dir}")
 
     # メインの学習関数を呼び出し
     train_sft(
@@ -310,23 +368,12 @@ def main():
         args.epochs,
         args.batch_size,
         args.accum_steps,
-        args.seed
+        args.seed,
+        args.test_collator,
     )
 
     # 実行した学習設定をJSONファイルとして保存
-    config = {
-        "base_model": str(base_model_path),
-        "resume_from_checkpoint": str(args.resume_from_checkpoint) if args.resume_from_checkpoint else None,
-        "model_type": args.model_type,
-        "train_dataset": str(Path(args.train_dataset).resolve()),
-        "valid_dataset": str(Path(args.valid_dataset).resolve()) if args.valid_dataset else None,
-        "user_template": args.user_template,
-        "assistant_template": args.assistant_template,
-        "epochs": args.epochs,
-        "batch_size": args.batch_size,
-        "accum_steps": args.accum_steps,
-        "seed": args.seed,
-    }
+    config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     write_config(output_dir, config)
     logging.info(f"学習設定を保存しました: {output_dir / 'config.json'}")
 

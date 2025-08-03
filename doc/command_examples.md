@@ -44,6 +44,9 @@ python -m src.models.train_bert --model-path models/extractor/modernbert-ja-310m
 ```
 python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --dataset data/JSQuAD/pipeline/train/step1/raw.jsonl
 ```
+```
+python -m src.models.train_sft --base-model models/generator/llm-jp-3.1-1.8b-instruct4/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --model-type q_generator --train-dataset data/JSQuAD/train/preprocessed.jsonl
+```
 
 ## generate
 ```
@@ -67,6 +70,11 @@ python -m src.models.generate --base-model models/generator/Llama-3.1-Swallow-8B
 ```
 ```
 python -m src.models.generate_and_extract --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --lora-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250627.gguf --template question_generator_user.j2 --bert-model models/extractor/roberta-base-japanese/safetensors/finetuned/20250708/best_model --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
+
+### llm-jp
+```
+python -m src.models.generate --base-model models/generator/llm-jp-3.1-1.8b-instruct4/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 
 ## convert
@@ -134,6 +142,32 @@ LLM_PORT=8081 python -m src.data.evaluate --ground-truth-file data/JSQuAD/eval/L
 ```
 ps aux | grep llama-server
 ```
+
+## 容量
+```
+df -h
+```
+
+## ggufモデルのテスト
+あらかじめtemplateファイルを定義しないと、llama-cppに登録されていないモデルは使えない
+```
+llama-cli -m models/generator/llm-jp-3.1-1.8b-instruct4/gguf/base.gguf -i --jinja --chat-template-file chat_tmp.tmpl
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # pipelineのコマンドの流れ
 ## 質問生成モデル開発

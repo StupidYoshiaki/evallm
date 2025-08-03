@@ -14,7 +14,7 @@ import torch
 from transformers import AutoModelForQuestionAnswering, AutoTokenizer
 # -------------------------
 
-from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm, handle_error
+from ..myutils.api import start_llama_server, stop_all_llama_servers, generate_from_llm, handle_error
 from ..myutils.parsing import build_messages, parse_json_objects 
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
@@ -135,6 +135,7 @@ def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
 async def generate_and_extract_with_retry(
     item: dict,
     client: httpx.AsyncClient,
+    port: int,
     template: str,
     model_label: str,
     max_tokens: int,
@@ -155,21 +156,16 @@ async def generate_and_extract_with_retry(
             messages = build_messages(template, context=context_value, examples=few_shots)
             resp_data = await generate_from_llm(
                 client=client,
+                port=port,
                 messages=messages,
                 model=model_label,
                 max_tokens=max_tokens,
                 temperature=temperature
             )
-
-            # text = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            # parsed_json_list = parse_json_objects(text)
-            
-            # if not parsed_json_list or "question" not in parsed_json_list[0]:
-            #     raise ValueError("LLMが有効な質問JSONを生成しませんでした。")
-            
-            # question = parsed_json_list[0]["question"]
-
             question = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+            # デバッグ用に生成質問をログ出力
+            logging.debug(f"生成された質問: {question}")
 
             # 2. BERTで回答を抽出 (CPU/GPUバウンドな処理なので別スレッドで実行)
             extracted_answer, score = await asyncio.to_thread(
@@ -217,6 +213,7 @@ async def main():
     p.add_argument("--n-gpu-layers", type=int, default=42, help="GPU レイヤ数")
     p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
     p.add_argument("--temperature", type=float, default=0.7, help="生成時の温度")
+    p.add_argument("--port", type=int, default=8080, help="llama-serverのポート番号")
     
     # BERT関連
     p.add_argument("--bert-model", type=Path, required=True, help="回答抽出用のBERTモデルのパス")
@@ -243,10 +240,11 @@ async def main():
     # 2. LLMサーバー起動
     start_llama_server(
         str(args.base_model), 
-        str(args.lora_model) if args.lora_model else None, 
+        args.port,
         args.n_gpu_layers,
         args.parallel,
-        n_ctx=args.n_ctx
+        n_ctx=args.n_ctx,
+        lora_path=str(args.lora_model) 
     )
     model_label = args.base_model.parts[2]
     
@@ -261,7 +259,7 @@ async def main():
             
             tasks = [
                 generate_and_extract_with_retry(
-                    item, client, args.template, model_label, args.max_tokens, few_shots, 
+                    item, client, args.port, args.template, model_label, args.max_tokens, few_shots, 
                     bert_model, bert_tokenizer, device, args.temperature
                 ) 
                 for item in batch
@@ -280,7 +278,7 @@ async def main():
     write_jsonl(out_path, results)
 
     # 5. LLMサーバー停止
-    stop_llama_server()
+    stop_all_llama_servers()
 
     # 6. 設定ファイル保存
     config = vars(args).copy()

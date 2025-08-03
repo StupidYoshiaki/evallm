@@ -16,7 +16,7 @@ def start_llama_server(
     n_gpu_layers: int,
     parallel: int = 8,
     n_ctx: int = 2048,
-    lora_path: Optional[str] = None,
+    lora_path: Path = None,
     timeout: int = 120
 ) -> None:
     """
@@ -36,12 +36,16 @@ def start_llama_server(
         "-c", str(n_ctx),
     ]
     if lora_path:
-        cmd += ["--lora", lora_path]
+        cmd += ["--lora", str(lora_path)]
     if n_gpu_layers is not None:
         cmd += ["--n-gpu-layers", str(n_gpu_layers)]
+    # if "llm-jp" in model_path:
+    #     template_path = Path(model_path).parent.parent / "chat_template.tmpl"
+    #     cmd += ["--jinja", "--chat-template-file", str(template_path)]
 
+    logging.info(f"llama-server起動コマンド: {' '.join(cmd)}")
     logging.info(f"ポート {port} でllama-serverを起動します: {' '.join(cmd)}")
-    log_file = Path(f"./llama_server_{port}.log")
+    log_file = Path(f"./log/llama_server_{port}.log")
     
     process = subprocess.Popen(
         cmd, 
@@ -117,3 +121,17 @@ async def generate_from_llm(
     resp = await client.post(url, json=payload, timeout=300.0)
     resp.raise_for_status()
     return resp.json()
+
+# SIGINT (Ctrl-C) をキャッチして、llama-server を停止する
+def _handle_sigint(signum, frame):
+    logging.info("CTRL-C を検知しました。llama-server を停止して終了します。")
+    stop_all_llama_servers()
+    exit(0)
+signal.signal(signal.SIGINT, _handle_sigint)
+
+# エラー時に handle_error を呼び出して、llama-server を停止する
+def handle_error():
+    logging.error("エラーが発生しました。llama-server を停止します。")
+    stop_all_llama_servers()
+    exit(1)
+signal.signal(signal.SIGTERM, lambda signum, frame: handle_error())

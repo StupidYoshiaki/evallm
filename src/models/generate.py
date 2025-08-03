@@ -8,7 +8,7 @@ from tqdm import tqdm
 import asyncio
 import httpx
 
-from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm, handle_error
+from ..myutils.api import start_llama_server, stop_all_llama_servers, generate_from_llm, handle_error
 from ..myutils.parsing import build_messages, parse_json_objects 
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
@@ -40,6 +40,7 @@ def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
 async def generate_and_parse_with_retry(
     item: dict,
     client: httpx.AsyncClient,
+    port: int,
     template: str,
     model_label: str,
     max_tokens: int,
@@ -56,6 +57,7 @@ async def generate_and_parse_with_retry(
             messages = build_messages(template, context=context_value, examples=few_shots)
             resp_data = await generate_from_llm(
                 client=client,
+                port=port,
                 messages=messages,
                 model=model_label,
                 max_tokens=max_tokens,
@@ -108,6 +110,7 @@ async def main():
     p.add_argument("--n-gpu-layers", type=int, default=42, help="GPU レイヤ数")
     p.add_argument("--parallel", type=int, default=8, help="並列処理数")
     p.add_argument("--n-ctx", type=int, default=2048, help="コンテキスト長 (n_ctx)")
+    p.add_argument("--port", type=int, default=8080, help="llama-serverのポート番号")
     p.add_argument("--temperature", type=float, default=0.7, help="生成時の温度（デフォルトは0.1）")
     p.add_argument("--log-filename", type=Path, default=None, help="ログファイル名")
     p.add_argument("--log-type", type=str, default="info", choices=["debug", "info"], help="ログレベル")
@@ -119,10 +122,11 @@ async def main():
     # サーバー起動
     start_llama_server(
         str(args.base_model), 
-        str(args.lora_model) if args.lora_model else None, 
+        args.port,
         args.n_gpu_layers,
         args.parallel,
-        n_ctx=args.n_ctx
+        n_ctx=args.n_ctx,
+        lora_path=args.lora_model 
     )
     model_label = args.base_model.parts[2]
     
@@ -138,7 +142,7 @@ async def main():
             
             tasks = [
                 generate_and_parse_with_retry(
-                    item, client, args.template, model_label, args.max_tokens, few_shots, args.temperature
+                    item, client, args.port, args.template, model_label, args.max_tokens, few_shots, args.temperature
                 ) 
                 for item in batch
             ]
@@ -156,26 +160,13 @@ async def main():
     write_jsonl(out_path, results)
 
     # サーバー停止
-    stop_llama_server()
+    stop_all_llama_servers()
 
-    # 設定ファイル保存
-    config = {
-        "base_model": str(args.base_model),
-        "lora_model": str(args.lora_model) if args.lora_model else None,
-        "template": args.template,
-        "input": str(args.input),
-        "few_shot_input": str(args.few_shot_input) if args.few_shot_input else None,
-        "shot_num": args.shot_num,
-        "output_dir": str(args.output_dir),
-        "max_tokens": args.max_tokens,
-        "n_gpu_layers": args.n_gpu_layers,
-        "parallel": args.parallel,
-        "n_ctx": args.n_ctx,
-        "temperature": args.temperature,
-        "log_filename": args.log_filename,
-        "log_type": args.log_type,
-    }
+    # 実行した学習設定をJSONファイルとして保存
+    config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     write_config(out_dir, config)
+    logging.info(f"学習設定を保存しました: {out_dir / 'config.json'}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

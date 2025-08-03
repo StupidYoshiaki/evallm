@@ -49,6 +49,7 @@ def download_gguf(repo_id: str, filename: str, revision: str, output_dir: Path):
     """
     repo_name = repo_id.split("/")[-1]
     repo_name = repo_name.replace("-GGUF", "")  # GGUFを削除
+    repo_name = repo_name.replace("-gguf", "")  # ggufを削除
     # もし末尾に -id (dは自然数) などがあれば削除
     repo_name = re.sub(r'-i\d*$', '', repo_name)
     model_dir = output_dir / repo_name

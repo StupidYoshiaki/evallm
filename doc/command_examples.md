@@ -47,6 +47,9 @@ python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8
 ```
 python -m src.models.train_sft --base-model models/generator/llm-jp-3.1-1.8b-instruct4/safetensors/base --user-template question_generator_user.j2 --assistant-template question_generator_assistant.j2 --model-type q_generator --train-dataset data/JSQuAD/train/preprocessed.jsonl
 ```
+```
+python -m src.models.train_sft --base-model models/generator/llm-jp-3.1-1.8b-instruct4/safetensors/base --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --model-type qa_generator --train-dataset data/JSQuAD/train/preprocessed.jsonl
+```
 
 ## generate
 ```
@@ -74,6 +77,12 @@ python -m src.models.generate_and_extract --base-model models/generator/Llama-3.
 
 ### llm-jp
 ```
+python -m src.models.generate --base-model models/generator/llm-jp-3.1-1.8b-instruct4/gguf/base.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
+```
+python -m src.models.generate --base-model models/generator/llm-jp-3.1-1.8b-instruct4/gguf/base.gguf --lora-model models/generator/llm-jp-3.1-1.8b-instruct4/gguf/sft-20250805.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048 --log-type debug --max-tokens 1000
+```
+```
 python -m src.models.generate --base-model models/generator/llm-jp-3.1-1.8b-instruct4/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
 ```
 
@@ -98,6 +107,9 @@ llama-quantize models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf models/g
 ```
 ```
  curl https://raw.githubusercontent.com/llm-jp/llm-jp-tokenizer/main/models/ver3.1/llm-jp-tokenizer-100k.ver3.1.model > tokenizer.model
+```
+```
+python ../opt/llama/convert_lora_to_gguf.py models/generator/llm-jp-3.1-1.8b-instruct4/safetensors/sft/20250804/checkpoint-7858 --outfile models/generator/llm-jp-3.1-1.8b-instruct4/gguf/sft-20250804.gguf --base models/generator/llm-jp-3.1-1.8b-instruct4/safetensors/base
 ```
 
 
@@ -251,4 +263,28 @@ python -m src.data.corr --file1 output/JSQuAD/baseline/ranking.md --file2 output
 python -m src.data.split -i data/JSQuAD/train.jsonl -r 95 -o1 data/JSQuAD/train/sft_train.jsonl -o2 data/JSQuAD/train/sft_valid.jsonl
 
 python -m src.models.train_sft --base-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/safetensors/base --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --train-dataset data/JSQuAD/train/sft_train.jsonl --valid-dataset data/JSQuAD/train/sft_valid.jsonl --model-type qa_generator  
+```
+
+### 方向性刺激生成
+```
+python -m src.models.generate_dsp --generator-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --generator-lora models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250530.gguf --generator-template qa_generator.j2 --refiner-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --refiner-template qa_generator_dsp.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
+```
+python -m src.models.generate_dsp --generator-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --generator-lora models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250530.gguf --generator-template qa_generator.j2 --refiner-model models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --refiner-template qa_generator_dsp.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 2048
+```
+```
+--log-filename log/generate_dsp.log --log-type debug
+```
+```
+./script/predict.sh -i data/JSQuAD/eval/mixture/202508061309/generated.jsonl -t evaluatee.j2
+```
+```
+python -m src.data.evaluate --ground-truth-file data/JSQuAD/eval/mixture/202508061309/generated.jsonl --prediction-base-dir output/JSQuAD/generated/mixture/202508061309
+```
+```
+python -m src.data.corr --file1 output/JSQuAD/baseline/ranking.md --file2 output/JSQuAD/generated/mixture/202508061309/ranking_20250806.md
+```
+
+```
+python -m src.models.train_sft --base-model models/generator/llm-jp-3.1-13b-instruct4/safetensors/base --user-template train_generator_user.j2 --assistant-template train_generator_assistant.j2 --model-type qa_generator --train-dataset data/JSQuAD/train/preprocessed.jsonl
 ```

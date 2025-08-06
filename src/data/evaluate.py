@@ -16,7 +16,7 @@ from tqdm import tqdm
 from ..myutils.logging import setup_logging
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.parsing import build_messages, parse_json_objects
-from ..myutils.api import start_llama_server, stop_llama_server, generate_from_llm, handle_error
+from ..myutils.api import start_llama_server, stop_all_llama_servers, generate_from_llm, handle_error
 
 # --- 定数 ---
 MAX_RETRIES = 50
@@ -216,7 +216,7 @@ async def evaluate_all_predictions(args: argparse.Namespace):
                             logging.warning(f"予測ファイルが見つかりません: {prediction_file}")
         finally:
             # 評価が終わったら必ずサーバーを停止
-            stop_llama_server()
+            stop_all_llama_servers()
             
         if not model_scores:
             logging.warning(f"{args.prediction_base_dir} 配下に評価対象の予測ファイルが見つかりませんでした。")
@@ -298,7 +298,7 @@ if __name__ == "__main__":
     except Exception:
         logging.error("予期せぬエラーでプログラムが停止しました。")
         logging.error(traceback.format_exc())
-        stop_llama_server() # 念のため
+        stop_all_llama_servers()
 
     config = {
         "ground_truth_file": str(args.ground_truth_file.resolve()),

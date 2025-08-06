@@ -112,7 +112,10 @@ def create_training_examples(
         elif model_type == "qa_generator":
             # generator: ユーザーは文脈のみを提示し、アシスタントは質問と答えを生成
             user_kwargs = {"context": context}
-            assistant_kwargs = {"question": record['question'], "answer": record['answers']["text"][0]}
+            try:
+                assistant_kwargs = {"question": record['question'], "answer": record['answers']["text"][0]}
+            except KeyError:
+                assistant_kwargs = {"question": record['question'], "answer": record['answer']}
 
         elif model_type == "q_generator":
             # q_generator: ユーザーは文脈のみを提示し、アシスタントは質問のみを生成

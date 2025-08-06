@@ -225,7 +225,7 @@ def train_sft(
         attn_implementation="eager"
     )
     # トークナイザの語彙サイズに合わせてモデルの埋め込み層をリサイズ
-    model.resize_token_embeddings(len(tokenizer))
+    # model.resize_token_embeddings(len(tokenizer))
 
     # 5. LoRA (PEFT) の設定
     peft_config = LoraConfig(

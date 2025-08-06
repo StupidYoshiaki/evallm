@@ -15,7 +15,7 @@ from ..myutils.logging import setup_logging
 import uuid
 
 MAX_RETRIES = 100 # 最大リトライ回数
-RETRY_DELAY = 2 # 再試行までの待機時間（秒）
+RETRY_DELAY = 5 # 再試行までの待機時間（秒）
 
 def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
     """Few-shotのサンプルを読み込み、単一の文字列に結合する"""

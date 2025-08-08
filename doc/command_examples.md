@@ -292,3 +292,7 @@ python -m src.models.train_sft --base-model models/generator/llm-jp-3.1-13b-inst
 ```
 python -m src.models.generate_dsp --generator-model models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/base.gguf --generator-lora models/generator/Llama-3.1-Swallow-8B-Instruct-v0.3/gguf/sft-20250602.gguf --generator-template qa_generator.j2 --refiner-model models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --refiner-template qa_generator_dsp_en2ja.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 4096
 ```
+
+```
+python -m src.models.generate --base-model models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --template qa_generator_few_shot.j2 --input data/JSQuAD/eval/baseline.jsonl --few-shot-input data/JSQuAD/eval/few_shot.jsonl --shot-num 10 --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 8192
+```

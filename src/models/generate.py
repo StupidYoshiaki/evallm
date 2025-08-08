@@ -7,6 +7,7 @@ from pathlib import Path
 from tqdm import tqdm
 import asyncio
 import httpx
+import signal
 
 from ..myutils.api import start_llama_server, stop_all_llama_servers, generate_from_llm, handle_error
 from ..myutils.parsing import build_messages, parse_json_objects 
@@ -96,7 +97,7 @@ async def generate_and_parse_with_retry(
     return None
 
 
-async def main():
+async def main_async():
     """非同期処理のメインロジック"""
     p = argparse.ArgumentParser(description="QA 生成用 CLI")
     p.add_argument("--base-model", type=Path, required=True, help="Base GGUF モデルファイルパス")
@@ -136,7 +137,7 @@ async def main():
     few_shots = get_few_shot_examples(args.few_shot_input, args.shot_num)
 
     results = []
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    async with httpx.AsyncClient() as client:
         for i in tqdm(range(0, len(dataset), args.parallel), desc="QA 生成中"):
             batch = dataset[i:i+args.parallel]
             
@@ -167,6 +168,23 @@ async def main():
     write_config(out_dir, config)
     logging.info(f"学習設定を保存しました: {out_dir / 'config.json'}")
 
+def main():
+    # Ctrl-Cなどで中断された場合でもサーバーを確実に停止するためのハンドラ
+    def signal_handler(signum, frame):
+        logging.info("CTRL-C を検知しました。全てのサーバーを停止して終了します。")
+        stop_all_llama_servers()
+        exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        asyncio.run(main_async())
+    except Exception as e:
+        logging.error(f"メイン処理で予期せぬエラーが発生しました: {e}", exc_info=True)
+    finally:
+        # 正常終了時、エラー発生時ともに、必ずサーバーを停止する
+        stop_all_llama_servers()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

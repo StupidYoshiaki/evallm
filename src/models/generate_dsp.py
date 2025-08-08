@@ -13,7 +13,7 @@ import signal
 from typing import Optional
 
 # 外部ユーティリティ関数のインポート（api.py, parsing.py, io.py, logging.pyが適切に配置されていると仮定）
-from ..myutils.api import start_llama_server, stop_all_llama_servers, generate_from_llm
+from ..myutils.api import start_llama_server, stop_all_llama_servers, generate_from_llm, handle_error
 from ..myutils.parsing import build_messages, parse_json_objects
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
@@ -118,8 +118,8 @@ async def directional_stimulus_pipeline_with_retry(
                 logging.info(f"{RETRY_DELAY}秒後に再試行します…")
                 await asyncio.sleep(RETRY_DELAY)
             else:
-                logging.error(f"id={item.get('id')} は最大試行回数に達したためスキップします。")
-                return None
+                logging.error(f"id={item.get('id')} は最大試行回数に達したため強制終了します。")
+                handle_error() # 強制終了
     return None
 
 

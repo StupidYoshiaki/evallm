@@ -12,11 +12,15 @@ import uuid
 import signal
 from typing import Optional
 
+import torch
+from transformers import AutoModelForQuestionAnswering, AutoTokenizer
+
 # 外部ユーティリティ関数のインポート（api.py, parsing.py, io.py, logging.pyが適切に配置されていると仮定）
 from ..myutils.api import start_llama_server, stop_all_llama_servers, generate_from_llm, handle_error
 from ..myutils.parsing import build_messages, parse_json_objects
 from ..myutils.io import read_jsonl, write_jsonl, write_config
 from ..myutils.logging import setup_logging
+from ..myutils.extractor import extract_single_answer, setup_bert_model
 
 # --- グローバル設定 ---
 MAX_RETRIES = 10 # 1つのアイテム処理あたりの最大リトライ回数
@@ -30,7 +34,10 @@ async def generate_qa_pair(
     max_tokens: int,
     temperature: float,
     context: str,
-    hint: Optional[str] = None
+    hint: Optional[str] = None,
+    bert_model: Optional[str] = None,
+    bert_tokenizer: Optional[AutoTokenizer] = None,
+    bert_device: Optional[torch.device] = None
 ) -> dict:
     """
     指定されたポートのLLMサーバーから単一のQAペアを生成し、パースするヘルパー関数。
@@ -52,9 +59,22 @@ async def generate_qa_pair(
     )
     text = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
+    # BERTモデルが指定されている場合、回答を抽出
+    if bert_model and model_name == "generator-model":
+        question = text
+        answer, _ = await asyncio.to_thread(
+            extract_single_answer,
+            question,
+            context,
+            bert_model,
+            bert_tokenizer,
+            bert_device
+        )
+        return {"question": question, "answer": answer}
+
     parsed_json_list = parse_json_objects(text)
     
-    if parsed_json_list and "question" in parsed_json_list[0] and "answer" in parsed_json_list[0]:
+    if parsed_json_list and "answer" in parsed_json_list[0] and "question" in parsed_json_list[0]:
         return parsed_json_list[0]
     else:
         logging.warning(f"ポート {port} からのレスポンスのパースに失敗しました。レスポンス: {text}")
@@ -64,7 +84,10 @@ async def generate_qa_pair(
 async def directional_stimulus_pipeline_with_retry(
     item: dict,
     client: httpx.AsyncClient,
-    args: argparse.Namespace
+    args: argparse.Namespace,
+    bert_model=None,
+    bert_tokenizer=None,
+    bert_device=None
 ) -> dict | None:
     """
     1. 小規模モデルでヒントQAを生成し、2. 大規模モデルで高品質なQAを生成するパイプライン。
@@ -82,7 +105,10 @@ async def directional_stimulus_pipeline_with_retry(
                 "generator-model",
                 args.max_tokens_gen,
                 args.temperature_gen,
-                context=context
+                context=context,
+                bert_model=bert_model,
+                bert_tokenizer=bert_tokenizer,
+                bert_device=bert_device
             )
             
             # ヒントを文字列として整形
@@ -142,6 +168,10 @@ async def main_async():
     p.add_argument("--temperature-refine", type=float, default=0.7, help="高品質化時の温度")
     p.add_argument("--max-tokens-refine", type=int, default=250, help="高品質化時の最大トークン数")
 
+    # --- BERT Model Arguments ---
+    p.add_argument("--bert-model", type=Path, default=None, help="回答抽出用のBERTモデルのパス")
+    p.add_argument("--bert-gpu-id", type=int, default=0, help="BERTモデルが使用するGPU ID")
+
     # --- Common Arguments ---
     p.add_argument("--input", type=Path, required=True, help="入力JSONLファイルパス（contextキーを含む）")
     p.add_argument("--output-dir", type=Path, required=True, help="出力ディレクトリ")
@@ -163,6 +193,12 @@ async def main_async():
         str(args.refiner_model), args.refiner_port, args.n_gpu_layers,
         args.parallel, args.n_ctx, str(args.refiner_lora) if args.refiner_lora else None
     )
+
+    # 2. BERTモデルのセットアップ（オプション）
+    bert_model, bert_tokenizer, bert_device = setup_bert_model(
+        model_path=args.bert_model,
+        gpu_id=args.bert_gpu_id
+    ) if args.bert_model else (None, None, None)
     
     dataset = read_jsonl(args.input)
     
@@ -171,7 +207,16 @@ async def main_async():
     async with httpx.AsyncClient() as client:
         for i in tqdm(range(0, len(dataset), args.parallel), desc="方向性刺激QA生成中"):
             batch = dataset[i:i+args.parallel]
-            tasks = [directional_stimulus_pipeline_with_retry(item, client, args) for item in batch]
+            tasks = [
+                directional_stimulus_pipeline_with_retry(
+                    item, 
+                    client, 
+                    args,
+                    bert_model=bert_model,
+                    bert_tokenizer=bert_tokenizer,
+                    bert_device=bert_device
+                ) for item in batch
+            ]
             batch_results = await asyncio.gather(*tasks)
             results.extend([res for res in batch_results if res is not None])
 

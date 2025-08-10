@@ -64,6 +64,7 @@ run_prediction() {
     --n-gpu-layers "$N_GPU_LAYERS"
     --parallel "$PARALLEL"
     --n-ctx "$N_CTX"
+    --port "$LLM_PORT"
   )
   # 追加の引数があれば結合
   if [ ${#POSITIONAL_ARGS[@]} -gt 0 ]; then

@@ -1,11 +1,14 @@
 import argparse
-import asyncio
-import json
 import logging
+import time  # リトライ待機のためにtimeモジュールをインポート
 from pathlib import Path
 
-import httpx
-from tqdm.asyncio import tqdm
+from tqdm import tqdm
+from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
+
+from ..myutils.parsing import build_messages, parse_json_objects
+from ..myutils.io import read_jsonl, write_jsonl
 
 # ロギング設定
 logging.basicConfig(
@@ -14,176 +17,187 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def read_jsonl(file_path: Path) -> list[dict]:
-    """JSONLファイルを読み込み、辞書のリストとして返します。"""
-    try:
-        with file_path.open("r", encoding="utf-8") as f:
-            return [json.loads(line) for line in f]
-    except FileNotFoundError:
-        logger.error(f"入力ファイルが見つかりません: {file_path}")
-        return []
-    except json.JSONDecodeError as e:
-        logger.error(f"ファイルのJSONデコード中にエラーが発生しました: {e}")
-        return []
-
-
-def write_jsonl(file_path: Path, data: list[dict]):
-    """辞書のリストをJSONLファイルに書き込みます。"""
-    try:
-        with file_path.open("w", encoding="utf-8") as f:
-            for item in data:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        logger.info(f"{len(data)} 件の評価結果を {file_path} に保存しました。")
-    except IOError as e:
-        logger.error(f"ファイルへの書き込み中にエラーが発生しました: {e}")
-
-
 class LLMAsJudge:
     """
-    vLLMサーバー上のLLMを使用してQAデータを評価するクラス。
+    vLLMとChat Templateを使用してローカルでQAデータを評価する最終版クラス。
+    リトライ機能を追加。
     """
-
     def __init__(
         self,
-        model_name: str,
-        prompt_template: str,
-        vllm_host: str = "localhost",
-        vllm_port: int = 8000,
+        model_path: str,
+        template_name: str,
+        tensor_parallel_size: int = 1,
+        max_retries: int = 100,       # 追加: 最大リトライ回数
+        retry_delay: int = 5,       # 追加: リトライ間の待機時間（秒）
     ):
-        self.model_name = model_name
-        self.prompt_template = prompt_template
-        self.api_url = f"http://{vllm_host}:{vllm_port}/generate"
-        self.headers = {"Content-Type": "application/json"}
+        self.template_name = template_name
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        
+        logger.info(f"モデル '{model_path}' をロードしています...")
+        self.llm = LLM(model=model_path, tensor_parallel_size=tensor_parallel_size)
+        
+        logger.info("トークナイザをロードしています...")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-    async def evaluate_item(self, client: httpx.AsyncClient, item: dict) -> dict:
-        """単一のQAデータ項目を評価します。"""
-        context = item.get("context")
-        question = item.get("question")
-        answer = item.get("answer")
-
-        if not all([context, question, answer]):
-            item["judge_error"] = "context, question, or answer is missing."
-            return item
-
-        prompt = self.prompt_template.format(
-            context=context, question=question, answer=answer
+        self.sampling_params = SamplingParams(
+            temperature=0, max_tokens=8192
         )
+        logger.info("モデルとトークナイザの準備が完了しました。")
 
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "max_tokens": 256,
-            "temperature": 0.1,
-            "n": 1,
-            "stop": ["\n"],
-        }
+    def evaluate_batch(self, batch: list[dict]) -> list[dict]:
+        """
+        QAデータのバッチを評価します。
+        vLLMでの推論や結果のパースに失敗した場合、指定回数リトライします。
+        """
+        prompts = []
+        valid_items_indices = []
+        
+        for i, item in enumerate(batch):
+            context = item.get("context")
+            question = item.get("question")
+            answer = item.get("answer")
 
-        try:
-            response = await client.post(
-                self.api_url, headers=self.headers, json=payload, timeout=60.0
-            )
-            response.raise_for_status()
+            if all([context, question, answer]):
+                prompt = build_messages(
+                    template_name=self.template_name,
+                    context=context,
+                    question=question,
+                    answer=answer
+                )
+                try:
+                    # prompt = self.tokenizer.apply_chat_template(
+                    #     messages,
+                    #     tokenize=False,
+                    #     add_generation_prompt=True
+                    # )
+                    prompts.append(prompt)
+                    valid_items_indices.append(i)
+                except Exception as e:
+                    logger.error(f"ID {item.get('id')}: チャットテンプレートの適用に失敗: {e}")
+                    item["judge_error"] = f"Failed to apply chat template: {e}"
+            else:
+                item["judge_error"] = "context, question, or answer is missing."
+        
+        if not prompts:
+            return batch
 
-            # vLLMのレスポンスからテキストを抽出
-            result_text = response.json()["text"][0][len(prompt):].strip()
-
-            # LLMの出力（JSON形式を期待）をパース
+        retries = 0
+        while retries < self.max_retries:
             try:
-                judge_result = json.loads(result_text)
-                item["judge_score"] = judge_result.get("score")
-                item["judge_reason"] = judge_result.get("reason")
-            except json.JSONDecodeError:
-                logger.warning(f"ID {item.get('id')}: Judge LLMの出力がJSON形式ではありません。")
-                item["judge_raw_output"] = result_text
-                item["judge_error"] = "Failed to parse judge output as JSON."
+                # --- vLLMでの推論と結果のパース（リトライ対象） ---
+                outputs = self.llm.generate(prompts, self.sampling_params)
 
-        except httpx.RequestError as e:
-            logger.error(f"ID {item.get('id')}: vLLMサーバーへのリクエストに失敗しました: {e}")
-            item["judge_error"] = f"Request to vLLM failed: {e}"
-        except Exception as e:
-            logger.error(f"ID {item.get('id')}: 評価中に予期せぬエラーが発生しました: {e}")
-            item["judge_error"] = f"An unexpected error occurred: {e}"
+                num_successful_parses = 0
+                for i, output in enumerate(outputs):
+                    item_index = valid_items_indices[i]
+                    item = batch[item_index]
+                    result_text = output.outputs[0].text.strip()
+                    
+                    parsed_list = parse_json_objects(result_text)
 
-        return item
+                    if parsed_list:
+                        judge_result = parsed_list[0]
+                        item["judge_score"] = judge_result.get("score")
+                        item["judge_reason"] = judge_result.get("reason")
+                        # 成功した場合、以前のエラー情報をクリア
+                        item.pop("judge_error", None)
+                        item.pop("judge_raw_output", None)
+                        num_successful_parses += 1
+                    else:
+                        logger.warning(f"ID {item.get('id')}: Judge LLMの出力から有効なJSONを抽出できませんでした。 Raw: '{result_text}'")
+                        item["judge_raw_output"] = result_text
+                        item["judge_error"] = "Failed to extract valid JSON from judge output."
+
+                # バッチ内のすべてのアイテムでパースが失敗した場合、リトライのために例外を発生させる
+                if num_successful_parses == 0 and prompts:
+                    raise ValueError("バッチ内のすべてのアイテムでJSONのパースに失敗しました。")
+
+                # 少なくとも1つ成功したら、処理成功とみなしループを抜ける
+                logger.info(f"バッチ処理成功。{num_successful_parses}/{len(prompts)} 件のパースに成功。")
+                return batch
+
+            except Exception as e:
+                retries += 1
+                logger.warning(f"バッチ処理でエラーが発生しました (試行 {retries}/{self.max_retries}): {e}")
+                if retries < self.max_retries:
+                    logger.info(f"{self.retry_delay}秒待機して再試行します...")
+                    time.sleep(self.retry_delay)
+                else:
+                    logger.error(f"最大リトライ回数({self.max_retries}回)に達しました。このバッチの処理を失敗とします。")
+                    # 最終的なエラーメッセージをバッチ内の全該当アイテムに設定
+                    for i in valid_items_indices:
+                        if "judge_score" not in batch[i]: # まだ成功していないアイテムのみ
+                            batch[i]["judge_error"] = f"Processing failed after {self.max_retries} retries: {e}"
+                    return batch
+        
+        return batch
 
 
-async def main():
+def main():
     """メインの実行関数。"""
     parser = argparse.ArgumentParser(
-        description="LLM-as-a-Judgeを使用してQAデータを定性評価します。"
+        description="ローカルLLMモデルを使用してQAデータを定性評価します（最終版 V2）。"
     )
     parser.add_argument(
-        "--model-name",
-        type=str,
-        required=True,
-        help="vLLMで起動しているモデル名 (例: 'elyza/ELYZA-japanese-Llama-2-7b-instruct')",
+        "--template-name", type=str, required=True,
+        help="評価に使用するJinja2テンプレートのファイル名 (例: 'judge_prompt.j2')。",
     )
     parser.add_argument(
-        "--prompt-template-file",
-        type=Path,
-        required=True,
-        help="評価に使用するプロンプトテンプレートのファイルパス。",
+        "--model-path", type=str, required=True,
+        help="評価に使用するHugging Faceモデル名。",
     )
     parser.add_argument(
-        "--input-file",
-        type=Path,
-        required=True,
+        "--input-file", type=Path, required=True,
         help="評価対象の入力JSONLファイルパス。",
     )
     parser.add_argument(
-        "--output-file",
-        type=Path,
-        required=True,
+        "--output-file", type=Path, required=True,
         help="評価結果を保存する出力JSONLファイルパス。",
     )
     parser.add_argument(
-        "--vllm-host", type=str, default="localhost", help="vLLMサーバーのホスト名。"
+        "--batch-size", type=int, default=16, help="一度に評価するバッチサイズ。"
     )
-    parser.add_argument("--vllm-port", type=int, default=8000, help="vLLMサーバーのポート番号。")
     parser.add_argument(
-        "--parallel", type=int, default=8, help="並列リクエスト数。"
+        "--tensor-parallel-size", type=int, default=1,
+        help="GPUの数に応じたテンソル並列サイズ。",
+    )
+    # --- 追加した引数 ---
+    parser.add_argument(
+        "--max-retries", type=int, default=100,
+        help="失敗時の最大リトライ回数。"
+    )
+    parser.add_argument(
+        "--retry-delay", type=int, default=5,
+        help="リトライ間の待機時間（秒）。"
     )
     args = parser.parse_args()
 
-    # プロンプトテンプレートを読み込み
-    try:
-        with args.prompt_template_file.open("r", encoding="utf-8") as f:
-            prompt_template = f.read()
-    except FileNotFoundError:
-        logger.error(f"プロンプトテンプレートファイルが見つかりません: {args.prompt_template_file}")
-        return
-
-    # 入力データを読み込み
     data_to_evaluate = read_jsonl(args.input_file)
     if not data_to_evaluate:
         return
 
-    # 評価器を初期化
-    evaluator = LLMAsJudge(
-        model_name=args.model_name,
-        prompt_template=prompt_template,
-        vllm_host=args.vllm_host,
-        vllm_port=args.vllm_port,
-    )
-
-    evaluated_results = []
-    # 非同期HTTPクライアントを使用して並列処理
-    async with httpx.AsyncClient() as client:
-        tasks = [evaluator.evaluate_item(client, item) for item in data_to_evaluate]
+    try:
+        evaluator = LLMAsJudge(
+            model_path=args.model_path,
+            template_name=args.template_name,
+            tensor_parallel_size=args.tensor_parallel_size,
+            max_retries=args.max_retries,          # 引数を渡す
+            retry_delay=args.retry_delay,        # 引数を渡す
+        )
+    except Exception as e:
+        logger.critical(f"評価器の初期化に失敗しました: {e}", exc_info=True)
+        return
         
-        # tqdmで進捗を表示
-        for future in tqdm(
-            asyncio.as_completed(tasks),
-            total=len(tasks),
-            desc="QAデータを評価中",
-        ):
-            result = await future
-            evaluated_results.append(result)
+    evaluated_results = []
+    for i in tqdm(range(0, len(data_to_evaluate), args.batch_size), desc="QAデータを評価中"):
+        batch = data_to_evaluate[i : i + args.batch_size]
+        processed_batch = evaluator.evaluate_batch(batch)
+        evaluated_results.extend(processed_batch)
 
-    # 結果をIDでソートして書き込み（任意）
-    evaluated_results.sort(key=lambda x: x.get("id", ""))
+    evaluated_results.sort(key=lambda x: str(x.get("id", "")))
     write_jsonl(args.output_file, evaluated_results)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

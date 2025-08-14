@@ -306,3 +306,9 @@ python ../opt/llama/convert_lora_to_gguf.py models/generator/llm-jp-3.1-13b-inst
 ```
 python -m src.models.generate --base-model models/generator/llm-jp-3.1-13b-instruct4/gguf/base.gguf --lora-model models/generator/llm-jp-3.1-13b-instruct4/gguf/sft-20250806.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --n-ctx 8192
 ```
+
+
+# LLM-as-a-Judgeによる定性評価
+```
+python -m src.evals.qualitive_llm --base-model models/evaluator/Qwen3-30B-A3B-Instruct-2507/gguf/base.gguf --template qualitive.j2 --input data/JSQuAD/eval/mixture/202508061309/generated.jsonl --output-dir data/JSQuAD/eval/mixture/202508061309
+```

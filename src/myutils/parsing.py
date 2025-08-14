@@ -9,7 +9,7 @@ from transformers import PreTrainedTokenizer
 from ..myutils.io import read_jsonl
 
 # JSONオブジェクトを抽出するための正規表現パターン
-JSON_OBJ_PATTERN = re.compile(r"\{(?:[^{}]|\n|\r)*\}")
+JSON_OBJ_PATTERN = re.compile(r'\{.*\}', re.DOTALL)
 
 # テンプレートファイルが格納されているディレクトリを設定
 TEMPLATE_DIR = Path(__file__).parent.parent / "prompt"
@@ -42,10 +42,19 @@ def build_messages(template_name: str, **kwargs) -> List[Dict[str, str]]:
 
 def parse_json_objects(text: str) -> List[Dict]:
     """
-    テキスト内からJSON形式のオブジェクトを全て抽出し、辞書のリストとして返す。
+    テキスト内から最も外側のJSONオブジェクトを抽出し、辞書のリストとして返す。
     """
+    # ```json ... ``` のようなマークダウンブロックを除去する前処理
+    match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if match:
+        text_to_parse = match.group(1)
+    else:
+        text_to_parse = text
+
     objs = []
-    for m in JSON_OBJ_PATTERN.finditer(text):
+    # finditerではなくsearchを使い、最初に見つかった最も大きなJSONだけを対象にする
+    m = JSON_OBJ_PATTERN.search(text_to_parse)
+    if m:
         try:
             objs.append(json.loads(m.group()))
         except json.JSONDecodeError:

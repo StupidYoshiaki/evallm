@@ -22,5 +22,6 @@
   },
   "forwardPorts": [8000],
   "postStartCommand": "pip install -r /workspaces/requirements.txt",
+  "postCreateCommand": "echo 'ulimit -c 0' >> ~/.bashrc",
   "remoteUser": "root"
 }

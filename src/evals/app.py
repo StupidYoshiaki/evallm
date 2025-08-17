@@ -151,6 +151,8 @@ def main():
         st.error("エラー: コマンドラインでJSONLファイルのパスを指定してください。")
         st.info("例: streamlit run app.py /path/to/your/file.jsonl")
         return
+    
+    st.sidebar.info(f"パス名: \n{filepath}")
 
     if not filepath.is_file():
         st.error(f"エラー: 指定されたファイルが見つかりません: {filepath}")

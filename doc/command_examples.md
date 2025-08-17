@@ -312,3 +312,13 @@ python -m src.models.generate --base-model models/generator/llm-jp-3.1-13b-instr
 ```
 python -m src.evals.qualitive_llm --base-model models/evaluator/Qwen3-30B-A3B-Instruct-2507/gguf/base.gguf --template qualitive.j2 --input data/JSQuAD/eval/mixture/202508061309/generated.jsonl --output-dir data/JSQuAD/eval/mixture/202508061309
 ```
+
+# Qwen3-30B-A3B-Instruct-2507の実力
+```
+python -m src.models.generate --base-model models/evaluator/Qwen3-30B-A3B-Instruct-2507/gguf/base.gguf --template qa_generator.j2 --input data/JSQuAD/eval/baseline.jsonl --output-dir data/JSQuAD/eval --n-gpu-layers 42 --parallel 8 --max-tokens 32768 --n-ctx 40960
+```
+
+# thinkingモデルによるllm-as-a-judge
+```
+python -m src.llm_as_a_judge.generate --base-model models/evaluator/Qwen3-30B-A3B-Thinking-2507/gguf/base.gguf --template llm_as_a_judge.j2 --input data/SHP/validation.jsonl --output-dir data/SHP/judged 
+```

@@ -62,7 +62,7 @@ async def generate_and_parse_with_retry(
             if think_match:
                 thinking_text = think_match.group(1).strip()
             else:
-                logging.warning(f"id={item_id} のレスポンスに <|think|> トークンが見つかりませんでした。")
+                logging.warning(f"id={item_id} のレスポンスに <think> トークンが見つかりませんでした。")
 
             # 2. テキストから judge JSON を抽出
             parsed_json_list = parse_json_objects(text)
@@ -82,7 +82,7 @@ async def generate_and_parse_with_retry(
 
             # 有効なJSONが見つからなかった場合
             logging.warning(f"id={item_id} のレスポンスから有効なjudge JSONを抽出できませんでした。レスポンステキスト: {text}")
-            raise ValueError("生成されたテキストから有効な'judge' JSONを抽出できませんでした。")
+            raise ValueError("生成されたテキストから有効なJSONを抽出できませんでした。")
 
         except Exception as e:
             retries += 1
@@ -95,8 +95,6 @@ async def generate_and_parse_with_retry(
                 return None
     return None
 
-# main_async, main関数は前回のコードと同じなので省略
-# ...（前回の回答のmain_asyncとmain関数をここにコピーしてください）...
 async def main_async():
     """非同期処理のメインロジック"""
     p = argparse.ArgumentParser(description="LLM as a Judge 実行用 CLI")

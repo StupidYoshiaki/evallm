@@ -23,8 +23,28 @@ from ..myutils.logging import setup_logging
 from ..myutils.extractor import extract_single_answer, setup_bert_model
 
 # --- グローバル設定 ---
-MAX_RETRIES = 10 # 1つのアイテム処理あたりの最大リトライ回数
+MAX_RETRIES = 100 # 1つのアイテム処理あたりの最大リトライ回数
 RETRY_DELAY = 5  # 再試行までの待機時間（秒）
+
+def get_few_shot_examples(few_shot_input: Path, shot_num: int) -> str | None:
+    """Few-shotのサンプルを読み込み、単一の文字列に結合する"""
+    if few_shot_input is None or shot_num is None or shot_num == 0:
+        return None
+    
+    dataset = read_jsonl(few_shot_input)
+    # shot_numがデータセットのサイズより大きい場合、全データを使う
+    random.seed(42)  # 再現性のためにシードを固定
+    dataset = random.sample(dataset, min(shot_num, len(dataset)))
+    
+    examples = []
+    for item in dataset:
+        shot = {
+            "question": item["question"],
+            "answer": item["answer"]
+        }
+        examples.append(json.dumps(shot, ensure_ascii=False))
+    
+    return "\n".join(examples)
 
 async def generate_qa_pair(
     client: httpx.AsyncClient,
@@ -35,6 +55,7 @@ async def generate_qa_pair(
     temperature: float,
     context: str,
     hint: Optional[str] = None,
+    few_shots: Optional[str] = None,
     bert_model: Optional[str] = None,
     bert_tokenizer: Optional[AutoTokenizer] = None,
     bert_device: Optional[torch.device] = None
@@ -46,6 +67,8 @@ async def generate_qa_pair(
     prompt_kwargs = {"context": context}
     if hint:
         prompt_kwargs["hint"] = hint
+    if few_shots:
+        prompt_kwargs["examples"] = few_shots
 
     messages = build_messages(template, **prompt_kwargs)
     
@@ -85,6 +108,7 @@ async def directional_stimulus_pipeline_with_retry(
     item: dict,
     client: httpx.AsyncClient,
     args: argparse.Namespace,
+    few_shots: Optional[str] = None,
     bert_model=None,
     bert_tokenizer=None,
     bert_device=None
@@ -94,7 +118,7 @@ async def directional_stimulus_pipeline_with_retry(
     """
     retries = 0
     context = item.get("context")
-    
+
     while retries < MAX_RETRIES:
         try:
             # --- Step 1: 小規模モデルでヒントを生成 ---
@@ -106,6 +130,8 @@ async def directional_stimulus_pipeline_with_retry(
                 args.max_tokens_gen,
                 args.temperature_gen,
                 context=context,
+                hint=None,
+                few_shots=few_shots,
                 bert_model=bert_model,
                 bert_tokenizer=bert_tokenizer,
                 bert_device=bert_device
@@ -123,7 +149,8 @@ async def directional_stimulus_pipeline_with_retry(
                 args.max_tokens_refine,
                 args.temperature_refine,
                 context=context,
-                hint=hint_str
+                hint=hint_str,
+                few_shots=None,
             )
 
             logging.info(f"id={item.get('id')} の処理に成功しました。")
@@ -159,6 +186,8 @@ async def main_async():
     p.add_argument("--generator-port", type=int, default=8080, help="ヒント生成用サーバーのポート番号")
     p.add_argument("--temperature-gen", type=float, default=0.7, help="ヒント生成時の温度")
     p.add_argument("--max-tokens-gen", type=int, default=200, help="ヒント生成時の最大トークン数")
+    p.add_argument("--few-shot-input", type=Path, default=None, help="Few-Shot用の入力 JSON ファイルパス")
+    p.add_argument("--shot-num", type=int, default=0, help="Few-Shot のサンプル数")
 
     # --- Refiner Model Arguments ---
     p.add_argument("--refiner-model", type=Path, required=True, help="高品質化用（大規模）モデルのGGUFパス")
@@ -201,6 +230,7 @@ async def main_async():
     ) if args.bert_model else (None, None, None)
     
     dataset = read_jsonl(args.input)
+    few_shots = get_few_shot_examples(args.few_shot_input, args.shot_num)
     
     # 2. メインのパイプライン処理
     results = []
@@ -212,6 +242,7 @@ async def main_async():
                     item, 
                     client, 
                     args,
+                    few_shots=few_shots,
                     bert_model=bert_model,
                     bert_tokenizer=bert_tokenizer,
                     bert_device=bert_device
